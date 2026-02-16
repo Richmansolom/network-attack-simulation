@@ -32,3 +32,7 @@ The intended structure is:
   - `simulation_design.md`
 
 ## Setup
+
+```bash
+pip install -r requirements.txt
+```
