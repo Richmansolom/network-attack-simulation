@@ -9,15 +9,16 @@ from src.simulator import NetworkAttackSimulation
 
 
 def validate_attack_generation():
-    """Validation 1: Attack Generation (Section 6.1)"""
-    lambda_rate = 0.5
+    """Validation 1: Attack Generation (Section 6.1) - Poisson: λ=0.5"""
+    np.random.seed(42)  # Reproducible results for statistical tests
+    lambda_rate = 0.5  # Poisson table: λ=0.5, E[N]=μ=λt
     duration = 1000
     n_trials = 30
     attack_counts = []
     all_inter_arrivals = []
 
     for _ in range(n_trials):
-        gen = AttackGenerator(attack_rate=lambda_rate, packets_per_attack=50)
+        gen = AttackGenerator(attack_rate=lambda_rate, packets_per_attack=50)  # Binomial n=50
         attack_times = gen.generate_attack_times(0.0, duration)
         attack_counts.append(len(attack_times))
         if len(attack_times) > 1:
@@ -42,6 +43,36 @@ def validate_attack_generation():
     else:
         print("\nFAIL: Tests fail - investigate!")
 
+    # Visualization (Section 3.2.1): Histogram + Q-Q plot
+    np.random.seed(42)
+    gen = AttackGenerator(attack_rate=lambda_rate, packets_per_attack=50)
+    attack_times = gen.generate_attack_times(0.0, 1000.0)
+    inter_arrivals = np.diff(attack_times)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    # Histogram with theoretical overlay
+    axes[0].hist(inter_arrivals, bins=50, density=True, alpha=0.7, edgecolor="black")
+    x = np.linspace(0, max(inter_arrivals), 100)
+    axes[0].plot(
+        x,
+        lambda_rate * np.exp(-lambda_rate * x),
+        "r-",
+        linewidth=2,
+        label="Theoretical",
+    )
+    axes[0].set_xlabel("Inter-Arrival Time (minutes)")
+    axes[0].set_ylabel("Density")
+    axes[0].set_title("Inter-Arrival Time Distribution")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    # Q-Q plot
+    stats.probplot(
+        inter_arrivals, dist=stats.expon(scale=1 / lambda_rate), plot=axes[1]
+    )
+    axes[1].set_title("Q-Q Plot vs Exponential")
+    plt.tight_layout()
+    plt.show()
+
 
 def validate_ids_detection():
     """Validation 2: Detection Accuracy (Section 4.2.1)"""
@@ -49,7 +80,7 @@ def validate_ids_detection():
 
     random.seed(42)
 
-    # Test parameters
+    # Test parameters (Binomial table: p=0.85, n=50)
     p_theoretical = 0.85
     n_packets = 50
     n_trials = 30
@@ -107,12 +138,12 @@ def validate_ids_detection():
 
 
 def validate_performance_degradation():
-    """Validation 3: Performance Degradation (Section 6.3)"""
-    # High attack rate config to cause degradation
+    """Validation 3: Performance Degradation (Section 6.3) - Degradation table: T₀=100, α"""
+    # Degradation table: T₀=100 Mbps, α=0.5 → steep decay. High load to induce throughput decay.
     config = {
         "network": {"bandwidth": 100, "buffer_size": 500, "latency": 10},
-        "ids": {"detection_prob": 0.70},
-        "attacks": {"rate": 2.0, "packets_per_attack": 100},
+        "ids": {"detection_prob": 0.70},  # Binomial p=0.70
+        "attacks": {"rate": 2.0, "packets_per_attack": 100},  # Heavy load
         "simulation": {"duration_minutes": 10, "sampling_interval": 0.5},
     }
 

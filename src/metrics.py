@@ -33,3 +33,16 @@ class MetricsCollector:
         """Return metrics as pandas DataFrame"""
         return pd.DataFrame(self.metrics_history)
 
+    def get_summary_stats(self) -> dict:
+        """Return summary statistics from the last sample (for Phase 3 experiments)."""
+        if not self.metrics_history:
+            return {}
+        last = self.metrics_history[-1]
+        return {
+            "final_detection_rate": last["detection_rate"],
+            "final_drop_rate": last["drop_rate"],
+            "total_detections": last["total_detections"],
+            "attacks_generated": last["attacks_generated"],
+            "final_buffer_utilization": last["buffer_utilization"],
+        }
+
