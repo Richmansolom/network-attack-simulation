@@ -1,5 +1,4 @@
 """
-Example Usage (Section 5.2.1)
 Runs the complete simulation and shows the 4-panel visualization.
 """
 
