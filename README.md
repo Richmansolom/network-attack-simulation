@@ -9,30 +9,45 @@ It is a discrete-event simulation with the following main components:
 - Intrusion Detection System (IDS)
 - Metrics Collector
 
-## Project structure
-
-The intended structure is:
-
-- `src/`
-  - `__init__.py`
-  - `simulator.py`
-  - `network.py`
-  - `ids.py`
-  - `attack_generator.py`
-  - `metrics.py`
-- `tests/`
-  - `test_network.py`
-  - `test_ids.py`
-  - `test_attack_generator.py`
-- `experiments/`
-  - `validation_scripts.py`
-- `data/`
-  - `results/`
-- `docs/`
-  - `simulation_design.md`
+Parameters are from the Binomial, Poisson, and Degradation Prediction tables (see `docs/simulation_design.md`).
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
 ```
+
+## Usage
+
+**Run simulation (4-panel plot):**
+```bash
+python main.py
+```
+
+**Run validations (attack generation, IDS detection, throughput degradation):**
+```bash
+python -m experiments.validation_scripts
+```
+
+**Generate theoretical model graphs (Binomial, Poisson, Exponential, Degradation):**
+```bash
+python -m experiments.generate_graphs
+```
+
+**Run tests:**
+```bash
+pytest
+```
+
+**Phase 3 experiments:**
+```bash
+python -m experiments.phase3_experiment_template
+```
+
+## Project structure
+
+- `src/` – simulator, network, IDS, attack generator, metrics
+- `tests/` – unit tests (`conftest.py` for import path)
+- `experiments/` – validation_scripts, generate_graphs, phase3_experiment_template
+- `data/results/` – output files
+- `docs/` – simulation_design.md

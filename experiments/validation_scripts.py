@@ -127,7 +127,7 @@ def validate_ids_detection():
         color="red",
         linestyle="--",
         linewidth=2,
-        label=f"Theoretical p = {p_theoretical}",
+        label=f"Theoretical probability = {p_theoretical}",
     )
     ax.axvline(
         mean_rate,
@@ -138,7 +138,7 @@ def validate_ids_detection():
     )
     ax.set_xlabel("Detection Rate")
     ax.set_ylabel("Frequency")
-    ax.set_title("Distribution of Simulated Detection Rates")
+    ax.set_title("Distribution of Simulated IDS Validation Detection Rates")
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.show()
