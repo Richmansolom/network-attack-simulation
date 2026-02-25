@@ -46,8 +46,26 @@ python -m experiments.phase3_experiment_template
 
 ## Project structure
 
-- `src/` – simulator, network, IDS, attack generator, metrics
-- `tests/` – unit tests (`conftest.py` for import path)
-- `experiments/` – validation_scripts, generate_graphs, phase3_experiment_template
-- `data/results/` – output files
-- `docs/` – simulation_design.md
+```
+network-attack-simulation/
+├── src/
+│   ├── __init__.py
+│   ├── simulator.py
+│   ├── network.py
+│   ├── ids.py
+│   ├── attack_generator.py
+│   └── metrics.py
+├── tests/
+│   ├── test_network.py
+│   ├── test_ids.py
+│   └── test_attack_generator.py
+├── experiments/
+│   └── validation_scripts.py
+├── data/
+│   └── results/
+├── docs/
+│   └── simulation_design.md
+├── main.py
+├── requirements.txt
+└── README.md
+```
