@@ -1,10 +1,20 @@
+import math
+
+
 class Network:
     """Simulates network with capacity and buffering"""
 
-    def __init__(self, bandwidth_mbps: float, buffer_size: int, latency_ms: float = 10.0):
+    def __init__(
+        self,
+        bandwidth_mbps: float,
+        buffer_size: int,
+        latency_ms: float = 10.0,
+        degradation_alpha: float = 0.0,
+    ):
         self.bandwidth = bandwidth_mbps
         self.buffer_size = buffer_size
         self.base_latency = latency_ms
+        self.degradation_alpha = degradation_alpha  # per minute, from Degradation table
         # State variables
         self.buffer_current = 0
         self.total_packets_received = 0
@@ -37,14 +47,18 @@ class Network:
             self.bytes_forwarded += packet["size_kb"] * 1024
 
     def get_current_throughput(self, current_time: float) -> float:
-        """Calculate current throughput in Mbps"""
+        """Calculate current throughput in Mbps.
+        When degradation_alpha > 0, applies T(t) = T₀ × e^(-αt) per Degradation table."""
         time_diff = current_time - self.last_sample_time
         if time_diff == 0:
             return 0.0
-        throughput = (self.bytes_forwarded * 8) / (time_diff * 1e6)
+        measured = (self.bytes_forwarded * 8) / (time_diff * 1e6)
         self.bytes_forwarded = 0
         self.last_sample_time = current_time
-        return throughput
+        if self.degradation_alpha > 0:
+            t_min = current_time / 60.0
+            return self.bandwidth * math.exp(-self.degradation_alpha * t_min)
+        return measured
 
     def get_packet_loss_rate(self) -> float:
         """Calculate packet drop rate"""

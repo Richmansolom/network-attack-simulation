@@ -65,6 +65,7 @@ class NetworkAttackSimulation:
         self.network = Network(
             bandwidth_mbps=config["network"]["bandwidth"],
             buffer_size=config["network"]["buffer_size"],
+            degradation_alpha=config["network"].get("degradation_alpha", 0.0),
         )
         self.ids = IntrusionDetectionSystem(
             detection_probability=config["ids"]["detection_prob"]

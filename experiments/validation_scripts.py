@@ -115,6 +115,13 @@ def validate_ids_detection():
     # Visualization
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.hist(detection_rates, bins=15, alpha=0.7, edgecolor="black", color="#3498db")
+    ax.axvspan(
+        ci_lower,
+        ci_upper,
+        alpha=0.2,
+        color="green",
+        label=f"95% CI [{ci_lower:.3f}, {ci_upper:.3f}]",
+    )
     ax.axvline(
         p_theoretical,
         color="red",
@@ -139,11 +146,16 @@ def validate_ids_detection():
 
 def validate_performance_degradation():
     """Validation 3: Performance Degradation (Section 6.3) - Degradation table: T₀=100, α"""
-    # Degradation table: T₀=100 Mbps, α=0.5 → steep decay. High load to induce throughput decay.
+    # Degradation table: T₀=100 Mbps, α=0.5 → steep decay (half-life 1.39 min)
     config = {
-        "network": {"bandwidth": 100, "buffer_size": 500, "latency": 10},
-        "ids": {"detection_prob": 0.70},  # Binomial p=0.70
-        "attacks": {"rate": 2.0, "packets_per_attack": 100},  # Heavy load
+        "network": {
+            "bandwidth": 100,
+            "buffer_size": 500,
+            "latency": 10,
+            "degradation_alpha": 0.5,  # per minute, from Degradation table
+        },
+        "ids": {"detection_prob": 0.70},
+        "attacks": {"rate": 2.0, "packets_per_attack": 100},
         "simulation": {"duration_minutes": 10, "sampling_interval": 0.5},
     }
 
@@ -152,10 +164,12 @@ def validate_performance_degradation():
     sim.run(duration_minutes=10, seed=42)
     results = sim.metrics.get_dataframe()
 
-    time = results["time"].values
+    # Time in minutes (Degradation table uses minutes)
+    time_sec = results["time"].values
+    time = time_sec / 60.0
     throughput = results["throughput_mbps"].values
 
-    # Fit exponential: T(t) = T0 * exp(-alpha * t)
+    # Fit exponential: T(t) = T0 * exp(-alpha * t), t in minutes, alpha per minute
     def exponential_decay(t, T0, alpha):
         return T0 * np.exp(-alpha * t)
 
@@ -170,7 +184,7 @@ def validate_performance_degradation():
 
     print("Exponential Fit Results:")
     print(f" T0 = {T0_fit:.2f} Mbps")
-    print(f" alpha = {alpha_fit:.4f} per second")
+    print(f" alpha = {alpha_fit:.4f} per minute")
     print(f" R² = {r_squared:.4f}")
     if r_squared > 0.90:
         print("PASS: Exponential model fits well")
@@ -187,7 +201,7 @@ def validate_performance_degradation():
         linewidth=2,
         label=f"Fit: R²={r_squared:.3f}",
     )
-    ax.set_xlabel("Time (seconds)")
+    ax.set_xlabel("Time (minutes)")
     ax.set_ylabel("Throughput (Mbps)")
     ax.set_title("Throughput Degradation with Exponential Fit")
     ax.legend()
