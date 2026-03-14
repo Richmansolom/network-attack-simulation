@@ -2,6 +2,7 @@ import heapq
 from typing import List, Any
 
 import numpy as np
+import random
 
 from .network import Network
 from .ids import IntrusionDetectionSystem
@@ -77,6 +78,9 @@ class NetworkAttackSimulation:
         self.metrics = MetricsCollector(
             sampling_interval=config["simulation"]["sampling_interval"]
         )
+        # Phase 3 tracking state
+        self.attack_times_min: List[float] = []
+        self.attack_detected = {}
         # Register event handlers
         self.engine.register_handler("attack_start", self._handle_attack_start)
         self.engine.register_handler("packet_arrival", self._handle_packet_arrival)
@@ -86,11 +90,17 @@ class NetworkAttackSimulation:
         """Run complete simulation"""
         if seed is not None:
             np.random.seed(seed)
+            random.seed(seed)
+        # Reset run-scoped tracking
+        self.attack_times_min = []
+        self.attack_detected = {}
         duration_seconds = duration_minutes * 60
         # Generate attack schedule
         attack_times = self.attack_gen.generate_attack_times(0.0, duration_minutes)
+        self.attack_times_min = attack_times[:]
         # Schedule all attacks
         for i, attack_time in enumerate(attack_times):
+            self.attack_detected[i] = False
             self.engine.schedule_event(
                 time=attack_time * 60,
                 event_type="attack_start",
@@ -124,10 +134,13 @@ class NetworkAttackSimulation:
     def _handle_packet_arrival(self, event: Event):
         """Handle packet arrival event"""
         packet = event.data["packet"]
+        attack_id = packet.get("attack_id")
         # IDS inspection
         if packet["malicious"]:
             detected = self.ids.inspect_packet(packet)
             if detected:
+                if attack_id is not None:
+                    self.attack_detected[attack_id] = True
                 packet["blocked"] = True
                 return
         # Send to network
@@ -138,4 +151,63 @@ class NetworkAttackSimulation:
     def _handle_sample_metrics(self, event: Event):
         """Handle metrics sampling event"""
         self.metrics.collect(event.time, self.network, self.ids, self.attack_gen)
+
+    def get_phase3_summary(self) -> dict:
+        """Return run-level outputs required by the Phase 3 data dictionary."""
+        df = self.metrics.get_dataframe()
+        if df.empty:
+            return {
+                "observed_detection_rate": 0.0,
+                "observed_packet_detection_rate": 0.0,
+                "total_attacks": 0,
+                "total_detected": 0,
+                "mean_inter_arrival_time": 0.0,
+                "attack_counts_per_interval": [],
+                "inter_arrival_times": [],
+                "final_throughput": 0.0,
+                "throughput_timeseries": [],
+                "mean_throughput": 0.0,
+                "initial_throughput": float(self.config["network"]["bandwidth"]),
+            }
+
+        total_attacks = len(self.attack_times_min)
+        total_detected = int(sum(1 for v in self.attack_detected.values() if v))
+        observed_detection_rate = (
+            total_detected / total_attacks if total_attacks > 0 else 0.0
+        )
+
+        inter_arrival_times = []
+        if len(self.attack_times_min) > 1:
+            inter_arrival_times = np.diff(self.attack_times_min).astype(float).tolist()
+        mean_inter_arrival_time = (
+            float(np.mean(inter_arrival_times)) if inter_arrival_times else 0.0
+        )
+
+        duration = int(self.config["simulation"].get("duration_minutes", 10))
+        attack_counts_per_interval = [0] * max(duration, 1)
+        for t in self.attack_times_min:
+            idx = int(t)
+            if 0 <= idx < len(attack_counts_per_interval):
+                attack_counts_per_interval[idx] += 1
+
+        throughput_timeseries = (
+            df[["time", "throughput_mbps"]]
+            .astype(float)
+            .values
+            .tolist()
+        )
+
+        return {
+            "observed_detection_rate": float(observed_detection_rate),
+            "observed_packet_detection_rate": float(self.ids.get_detection_rate()),
+            "total_attacks": int(total_attacks),
+            "total_detected": int(total_detected),
+            "mean_inter_arrival_time": float(mean_inter_arrival_time),
+            "attack_counts_per_interval": attack_counts_per_interval,
+            "inter_arrival_times": inter_arrival_times,
+            "final_throughput": float(df["throughput_mbps"].iloc[-1]),
+            "throughput_timeseries": throughput_timeseries,
+            "mean_throughput": float(df["throughput_mbps"].mean()),
+            "initial_throughput": float(self.config["network"]["bandwidth"]),
+        }
 
