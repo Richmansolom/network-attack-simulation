@@ -37,8 +37,9 @@ jobs:
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: phase3-csv-artifacts
+          name: phase3-results-and-figures
           path: |
             results/*.csv
             analysis/tables/*.csv
+            analysis/figures/*.png
           if-no-files-found: error
