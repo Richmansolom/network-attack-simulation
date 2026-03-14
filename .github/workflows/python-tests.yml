@@ -28,18 +28,18 @@ jobs:
         run: |
           pytest
 
-      - name: Generate Phase 3 CSV outputs (synthetic)
+      - name: Generate Phase 3 full experiment outputs
         env:
           PYTHONPATH: .
         run: |
-          python -c "import phase3_analysis as p; cfg=p.Phase3Config(); cfg.run_synthetic=False; cfg.run_experiments=False; cfg.run_analysis=False; cfg.show_figures=False; cfg.results_dir='results'; cfg.analysis_dir='analysis'; p.ensure_dirs(cfg); p.generate_synthetic_data(out_csv='results/all_results.csv'); p.run_full_analysis(cfg)"
+          python -c "import phase3_analysis as p; cfg=p.Phase3Config(); cfg.run_synthetic=False; cfg.run_experiments=True; cfg.run_analysis=True; cfg.show_figures=False; cfg.results_dir='results_fixed'; cfg.analysis_dir='analysis_fixed'; cfg.experiment_plan_csv='experiment_plan_fixed.csv'; p.ensure_dirs(cfg); p.build_experiment_plan(cfg); runner=p.ExperimentRunner(cfg.experiment_plan_csv, output_dir=cfg.results_dir); runner.run_all(save_every=50); p.run_quality_check('results_fixed/all_results.csv'); p.run_full_analysis(cfg)"
 
-      - name: Upload CSV artifacts
+      - name: Upload Phase 3 artifacts
         uses: actions/upload-artifact@v4
         with:
           name: phase3-results-and-figures
           path: |
-            results/*.csv
-            analysis/tables/*.csv
-            analysis/figures/*.png
+            results_fixed/*.csv
+            analysis_fixed/tables/*.csv
+            analysis_fixed/figures/*.png
           if-no-files-found: error
