@@ -371,29 +371,23 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     h1_table = pd.DataFrame(results_h1)
     h1_table.to_csv(os.path.join(out_tables, "h1_results.csv"), index=False)
 
-    fig, (ax_top, ax_zoom) = plt.subplots(
-        2,
-        1,
-        figsize=(12, 9),
-        sharex=True,
-        gridspec_kw={"height_ratios": [2, 1]},
-        constrained_layout=True,
-    )
+    fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
     n_range = np.arange(1, 105)
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
     n_levels = sorted(df["n_packets_per_attack"].unique())
+    y_values = []
 
     for i, p in enumerate(sorted(df["p_detection"].unique())):
         theory_curve = 1 - (1 - p) ** n_range
-        for ax in (ax_top, ax_zoom):
-            ax.plot(
-                n_range,
-                theory_curve,
-                "-",
-                color=colors[i % len(colors)],
-                linewidth=2,
-                label=f"Theory p={p:.2f}" if ax is ax_top else None,
-            )
+        ax.plot(
+            n_range,
+            theory_curve,
+            "-",
+            color=colors[i % len(colors)],
+            linewidth=2,
+            label=f"Theory p={p:.2f}",
+        )
+        y_values.extend(theory_curve.tolist())
         for n in n_levels:
             subset = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
             if len(subset) == 0:
@@ -401,36 +395,40 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
             obs_mean = subset["observed_detection_rate"].mean()
             obs_se = subset["observed_detection_rate"].std(ddof=1) / np.sqrt(len(subset))
             yerr = 1.96 * obs_se if np.isfinite(obs_se) else 0
-            for ax in (ax_top, ax_zoom):
-                ax.errorbar(
-                    n,
-                    obs_mean,
-                    yerr=yerr,
-                    fmt="o",
-                    color=colors[i % len(colors)],
-                    markersize=7,
-                    capsize=4,
-                    capthick=1.2,
-                    markeredgecolor="black",
-                    markeredgewidth=0.5,
-                )
+            ax.errorbar(
+                n,
+                obs_mean,
+                yerr=yerr,
+                fmt="o",
+                color=colors[i % len(colors)],
+                markersize=7,
+                capsize=4,
+                capthick=1.2,
+                markeredgecolor="black",
+                markeredgewidth=0.5,
+            )
+            y_values.append(float(obs_mean))
+            y_values.append(float(obs_mean - yerr))
+            y_values.append(float(obs_mean + yerr))
 
-    ax_top.set_ylabel("P(Detect at Least 1 Packet)", fontsize=12)
-    ax_top.set_title(
+    ax.set_ylabel("P(Detect at Least 1 Packet)", fontsize=12)
+    ax.set_xlabel("Packets per Attack (n)", fontsize=12)
+    ax.set_title(
         "Hypothesis 1: Theoretical vs. Simulated Detection Probability",
         fontsize=16,
         fontweight="bold",
     )
-    ax_top.set_ylim(-0.02, 1.02)
-    ax_top.grid(True, alpha=0.3)
-    ax_top.legend(fontsize=10, loc="lower right")
-
-    # Zoom panel makes high-probability separation readable
-    ax_zoom.set_xlabel("Packets per Attack (n)", fontsize=12)
-    ax_zoom.set_ylabel("Zoom", fontsize=11)
-    ax_zoom.set_ylim(0.90, 1.005)
-    ax_zoom.set_xticks(n_levels)
-    ax_zoom.grid(True, alpha=0.3)
+    # Adaptive y-limits keep a single-plot view readable when values are near 1.0.
+    y_min = max(0.0, min(y_values) - 0.03) if y_values else 0.0
+    y_max = min(1.02, max(y_values) + 0.01) if y_values else 1.02
+    if y_min > 0.85:
+        y_min = max(0.85, y_min)
+    else:
+        y_min = 0.0
+    ax.set_ylim(y_min, y_max)
+    ax.set_xticks(n_levels)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=10, loc="lower right")
 
     plt.savefig(os.path.join(out_figs, "h1_detection_overlay.png"), dpi=300, bbox_inches="tight")
     if show_figures:
@@ -794,8 +792,11 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
 
     pivot = df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
     fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
-    vmax = max(0.05, float(np.nanmax(np.abs(pivot.values))))
-    im = ax.imshow(pivot.values, cmap="RdBu_r", aspect="auto", vmin=-vmax, vmax=vmax)
+    abs_max = float(np.nanmax(np.abs(pivot.values)))
+    all_zero_error = np.isclose(abs_max, 0.0)
+    vmax = max(0.05, abs_max)
+    cmap = "Greys" if all_zero_error else "RdBu_r"
+    im = ax.imshow(pivot.values, cmap=cmap, aspect="auto", vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels([f"{v:.1f}" for v in pivot.columns])
     ax.set_yticks(range(len(pivot.index)))
@@ -808,6 +809,17 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
         fontsize=13,
         fontweight="bold",
     )
+    if all_zero_error:
+        ax.text(
+            0.5,
+            1.06,
+            "All cells are ~0.000 (no detectable interaction error).",
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            color="dimgray",
+        )
     for i in range(len(pivot.index)):
         for j in range(len(pivot.columns)):
             val = pivot.values[i, j]
@@ -841,6 +853,14 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     ax.set_xlabel("Attack Rate (lambda)", fontsize=12)
     ax.set_ylabel("Mean Observed Detection Rate", fontsize=12)
     ax.set_title("Interaction Plot: IDS Quality x Attack Rate", fontsize=13, fontweight="bold")
+    # When curves overlap at ~0/1 levels, tighten y-range for readability.
+    y_all = []
+    for p in sorted(df["p_detection"].unique()):
+        sub = df[df["p_detection"] == p]
+        y_all.extend(sub.groupby("lambda_attack_rate")["observed_detection_rate"].mean().values.tolist())
+    if y_all and (max(y_all) - min(y_all) < 0.03):
+        center = float(np.mean(y_all))
+        ax.set_ylim(max(0.0, center - 0.03), min(1.0, center + 0.03))
     ax.legend(title="IDS Quality", fontsize=10)
     ax.grid(True, alpha=0.3)
     plt.savefig(os.path.join(out_figs, "h5_interaction_plot.png"), dpi=300, bbox_inches="tight")
