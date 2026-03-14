@@ -1,6 +1,8 @@
-# Network Attack Simulation (Phase 2)
+# Network Attack Simulation (Phase 2 + Phase 3)
 
-This project implements the **Phase 2: Network Attack Simulation** specified in your course handout.  
+This project implements the **Phase 2 (simulation)** and **Phase 3 (experimental/statistical analysis)**
+requirements from your course handout.
+
 It is a discrete-event simulation with the following main components:
 
 - Clock & Event Manager
@@ -44,6 +46,34 @@ pytest
 python -m experiments.phase3_experiment_template
 ```
 
+**Run full Phase 3 pipeline (plan + experiments + analysis):**
+```bash
+python phase3_analysis.py
+```
+
+On Windows PowerShell, if `src` import errors appear for module-style commands:
+```powershell
+$env:PYTHONPATH='.'
+python "experiments/phase3_experiment_template.py"
+```
+
+## GitHub Actions artifacts
+
+The GitHub Actions workflow runs tests, generates Phase 3 synthetic outputs, and uploads artifacts.
+
+Artifact name:
+- `phase3-results-and-figures`
+
+Included files:
+- `results/*.csv`
+- `analysis/tables/*.csv`
+- `analysis/figures/*.png`
+
+How to download:
+1. Open your repository on GitHub.
+2. Go to **Actions** and open a completed workflow run.
+3. Scroll to **Artifacts** and download `phase3-results-and-figures`.
+
 ## Project structure
 
 ```
@@ -60,12 +90,17 @@ network-attack-simulation/
 │   ├── test_ids.py
 │   └── test_attack_generator.py
 ├── experiments/
-│   └── validation_scripts.py
+│   ├── validation_scripts.py
+│   ├── generate_graphs.py
+│   └── phase3_experiment_template.py
 ├── data/
 │   └── results/
+├── results/
+├── analysis/
 ├── docs/
 │   └── simulation_design.md
 ├── main.py
+├── phase3_analysis.py
 ├── requirements.txt
 └── README.md
 ```
