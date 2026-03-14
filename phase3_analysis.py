@@ -24,6 +24,8 @@ from scipy.optimize import curve_fit
 
 from src.simulator import NetworkAttackSimulation
 
+plt.style.use("seaborn-v0_8-whitegrid")
+
 
 @dataclass
 class Phase3Config:
@@ -40,8 +42,9 @@ class Phase3Config:
     # === MODIFY THESE VALUES ===
     # Execution switches (set these manually per phase step)
     run_synthetic: bool = False
-    run_experiments: bool = False
-    run_analysis: bool = False
+    run_experiments: bool = True
+    run_analysis: bool = True
+    show_figures: bool = True
     # ===========================
 
     def __post_init__(self):
@@ -316,7 +319,7 @@ class ExperimentRunner:
 # ============================
 # Sections 3-9: Analyses
 # ============================
-def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str):
+def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: bool = True):
     print("=" * 65)
     print("HYPOTHESIS 1: BINOMIAL DETECTION MODEL")
     print("=" * 65)
@@ -324,13 +327,20 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str):
     for p in sorted(df["p_detection"].unique()):
         for n in sorted(df["n_packets_per_attack"].unique()):
             subset = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
+            # H1 metric is undefined when total_attacks == 0 (0/0). Exclude those runs.
+            subset = subset[subset["total_attacks"] > 0]
             if len(subset) == 0:
                 continue
             p_theory = 1 - (1 - p) ** n
             observed = subset["observed_detection_rate"].values
             obs_mean = np.mean(observed)
             obs_std = np.std(observed, ddof=1) if len(observed) > 1 else 0.0
-            t_stat, p_value = stats.ttest_1samp(observed, p_theory)
+            if obs_std == 0:
+                # Degenerate case: all replications identical
+                t_stat = 0.0
+                p_value = 1.0 if np.isclose(obs_mean, p_theory, atol=1e-6) else 0.0
+            else:
+                t_stat, p_value = stats.ttest_1samp(observed, p_theory)
             se = obs_std / np.sqrt(len(observed)) if len(observed) > 0 else 0.0
             ci_lower = obs_mean - 1.96 * se
             ci_upper = obs_mean + 1.96 * se
@@ -350,9 +360,10 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str):
                     "p_value": p_value,
                 }
             )
-            status = "MATCH" if p_value > 0.05 else "DIFFERS"
+            status = "MATCH" if p_value >= 0.05 else "DIFFERS"
+            n_int = int(n)
             print(
-                f"p={p:.2f}, n={n:3d}: theory={p_theory:.4f}, "
+                f"p={p:.2f}, n={n_int:3d}: theory={p_theory:.4f}, "
                 f"observed={obs_mean:.4f} +/- {obs_std:.4f}, "
                 f"p-value={p_value:.4f} [{status}]"
             )
@@ -360,54 +371,76 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str):
     h1_table = pd.DataFrame(results_h1)
     h1_table.to_csv(os.path.join(out_tables, "h1_results.csv"), index=False)
 
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, (ax_top, ax_zoom) = plt.subplots(
+        2,
+        1,
+        figsize=(12, 9),
+        sharex=True,
+        gridspec_kw={"height_ratios": [2, 1]},
+        constrained_layout=True,
+    )
     n_range = np.arange(1, 105)
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+    n_levels = sorted(df["n_packets_per_attack"].unique())
+
     for i, p in enumerate(sorted(df["p_detection"].unique())):
         theory_curve = 1 - (1 - p) ** n_range
-        ax.plot(
-            n_range,
-            theory_curve,
-            "-",
-            color=colors[i % len(colors)],
-            linewidth=2,
-            label=f"Theory p={p:.2f}",
-        )
-        for n in sorted(df["n_packets_per_attack"].unique()):
+        for ax in (ax_top, ax_zoom):
+            ax.plot(
+                n_range,
+                theory_curve,
+                "-",
+                color=colors[i % len(colors)],
+                linewidth=2,
+                label=f"Theory p={p:.2f}" if ax is ax_top else None,
+            )
+        for n in n_levels:
             subset = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
             if len(subset) == 0:
                 continue
             obs_mean = subset["observed_detection_rate"].mean()
             obs_se = subset["observed_detection_rate"].std(ddof=1) / np.sqrt(len(subset))
-            ax.errorbar(
-                n,
-                obs_mean,
-                yerr=1.96 * obs_se if np.isfinite(obs_se) else 0,
-                fmt="o",
-                color=colors[i % len(colors)],
-                markersize=8,
-                capsize=4,
-                capthick=1.5,
-                markeredgecolor="black",
-                markeredgewidth=0.5,
-            )
-    ax.set_xlabel("Packets per Attack (n)", fontsize=13)
-    ax.set_ylabel("P(Detect at Least 1 Packet)", fontsize=13)
-    ax.set_title(
+            yerr = 1.96 * obs_se if np.isfinite(obs_se) else 0
+            for ax in (ax_top, ax_zoom):
+                ax.errorbar(
+                    n,
+                    obs_mean,
+                    yerr=yerr,
+                    fmt="o",
+                    color=colors[i % len(colors)],
+                    markersize=7,
+                    capsize=4,
+                    capthick=1.2,
+                    markeredgecolor="black",
+                    markeredgewidth=0.5,
+                )
+
+    ax_top.set_ylabel("P(Detect at Least 1 Packet)", fontsize=12)
+    ax_top.set_title(
         "Hypothesis 1: Theoretical vs. Simulated Detection Probability",
-        fontsize=14,
+        fontsize=16,
         fontweight="bold",
     )
-    ax.legend(fontsize=10, loc="lower right")
-    ax.set_ylim(-0.05, 1.05)
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
+    ax_top.set_ylim(-0.02, 1.02)
+    ax_top.grid(True, alpha=0.3)
+    ax_top.legend(fontsize=10, loc="lower right")
+
+    # Zoom panel makes high-probability separation readable
+    ax_zoom.set_xlabel("Packets per Attack (n)", fontsize=12)
+    ax_zoom.set_ylabel("Zoom", fontsize=11)
+    ax_zoom.set_ylim(0.90, 1.005)
+    ax_zoom.set_xticks(n_levels)
+    ax_zoom.grid(True, alpha=0.3)
+
     plt.savefig(os.path.join(out_figs, "h1_detection_overlay.png"), dpi=300, bbox_inches="tight")
-    plt.close(fig)
+    if show_figures:
+        plt.show()
+    else:
+        plt.close(fig)
     return h1_table
 
 
-def analyze_h2(df: pd.DataFrame, out_tables: str, out_figs: str):
+def analyze_h2(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: bool = True):
     print("=" * 65)
     print("HYPOTHESIS 2: POISSON ATTACK COUNTS")
     print("=" * 65)
@@ -443,6 +476,12 @@ def analyze_h2(df: pd.DataFrame, out_tables: str, out_figs: str):
             else:
                 obs_combined.append(obs_accum)
                 exp_combined.append(exp_accum)
+        # Align totals before chi-square (required by scipy)
+        obs_total = float(np.sum(obs_combined))
+        exp_total = float(np.sum(exp_combined))
+        if exp_total > 0:
+            scale = obs_total / exp_total
+            exp_combined = [e * scale for e in exp_combined]
         chi2, p_value = stats.chisquare(obs_combined, exp_combined)
         results_h2.append(
             {
@@ -465,7 +504,13 @@ def analyze_h2(df: pd.DataFrame, out_tables: str, out_figs: str):
     h2_table = pd.DataFrame(results_h2)
     h2_table.to_csv(os.path.join(out_tables, "h2_results.csv"), index=False)
 
-    fig, axes = plt.subplots(1, len(lambdas), figsize=(5 * len(lambdas), 5), sharey=False)
+    fig, axes = plt.subplots(
+        1,
+        len(lambdas),
+        figsize=(6 * len(lambdas), 5.5),
+        sharey=False,
+        constrained_layout=True,
+    )
     if len(lambdas) == 1:
         axes = [axes]
     for ax, lam in zip(axes, lambdas):
@@ -475,23 +520,33 @@ def analyze_h2(df: pd.DataFrame, out_tables: str, out_figs: str):
         counts = subset["total_attacks"].values
         max_k = int(max(counts.max(), expected_mean + 4 * np.sqrt(expected_mean)))
         bins = np.arange(-0.5, max_k + 1.5)
-        ax.hist(counts, bins=bins, density=True, alpha=0.7, edgecolor="black", label="Simulated", color="steelblue")
+        ax.hist(
+            counts,
+            bins=bins,
+            density=True,
+            alpha=0.75,
+            edgecolor="black",
+            label="Simulated",
+            color="steelblue",
+        )
         k_vals = np.arange(0, max_k + 1)
         pmf_vals = stats.poisson.pmf(k_vals, expected_mean)
         ax.plot(k_vals, pmf_vals, "ro-", markersize=6, linewidth=2, label=f"Poisson({expected_mean:.0f})")
         ax.set_xlabel("Number of Attacks", fontsize=11)
         ax.set_ylabel("Probability", fontsize=11)
         ax.set_title(f"lambda = {lam}", fontsize=12, fontweight="bold")
+        ax.set_xticks(np.arange(0, max_k + 1, max(1, int(max_k / 10))))
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
-    plt.suptitle("Hypothesis 2: Observed vs. Poisson Attack Counts", fontsize=14, fontweight="bold", y=1.02)
-    plt.tight_layout()
+    fig.suptitle("Hypothesis 2: Observed vs. Poisson Attack Counts", fontsize=15, fontweight="bold")
     plt.savefig(os.path.join(out_figs, "h2_poisson_overlay.png"), dpi=300, bbox_inches="tight")
+    if show_figures:
+        plt.show()
     plt.close(fig)
     return h2_table
 
 
-def analyze_h3(df: pd.DataFrame, out_tables: str, out_figs: str):
+def analyze_h3(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: bool = True):
     print("=" * 65)
     print("HYPOTHESIS 3: EXPONENTIAL INTER-ARRIVAL TIMES")
     print("=" * 65)
@@ -532,7 +587,12 @@ def analyze_h3(df: pd.DataFrame, out_tables: str, out_figs: str):
     h3_table = pd.DataFrame(results_h3)
     h3_table.to_csv(os.path.join(out_tables, "h3_results.csv"), index=False)
 
-    fig, axes = plt.subplots(2, len(lambdas), figsize=(5 * len(lambdas), 9))
+    fig, axes = plt.subplots(
+        2,
+        len(lambdas),
+        figsize=(6 * len(lambdas), 9),
+        constrained_layout=True,
+    )
     if len(lambdas) == 1:
         axes = np.array([[axes[0]], [axes[1]]])
     for col, lam in enumerate(lambdas):
@@ -547,7 +607,15 @@ def analyze_h3(df: pd.DataFrame, out_tables: str, out_figs: str):
         if len(ia) == 0:
             continue
         ax_hist = axes[0, col]
-        ax_hist.hist(ia, bins=50, density=True, alpha=0.7, edgecolor="black", color="steelblue", label="Simulated")
+        ax_hist.hist(
+            ia,
+            bins=40,
+            density=True,
+            alpha=0.75,
+            edgecolor="black",
+            color="steelblue",
+            label="Simulated",
+        )
         t_range = np.linspace(0, np.percentile(ia, 99), 200)
         pdf_theory = lam * np.exp(-lam * t_range)
         ax_hist.plot(t_range, pdf_theory, "r-", linewidth=2.5, label=f"Exp(lambda={lam})")
@@ -569,9 +637,10 @@ def analyze_h3(df: pd.DataFrame, out_tables: str, out_figs: str):
         ax_qq.set_title(f"Q-Q Plot: lambda = {lam}", fontweight="bold")
         ax_qq.legend()
         ax_qq.grid(True, alpha=0.3)
-    plt.suptitle("Hypothesis 3: Exponential Inter-Arrival Time Analysis", fontsize=14, fontweight="bold", y=1.02)
-    plt.tight_layout()
+    fig.suptitle("Hypothesis 3: Exponential Inter-Arrival Time Analysis", fontsize=15, fontweight="bold")
     plt.savefig(os.path.join(out_figs, "h3_exponential_analysis.png"), dpi=300, bbox_inches="tight")
+    if show_figures:
+        plt.show()
     plt.close(fig)
     return h3_table
 
@@ -580,7 +649,7 @@ def decay_model(t, T0, alpha):
     return T0 * np.exp(-alpha * t)
 
 
-def analyze_h4(df: pd.DataFrame, out_tables: str, out_figs: str):
+def analyze_h4(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: bool = True):
     print("=" * 65)
     print("HYPOTHESIS 4: THROUGHPUT DEGRADATION (EXPONENTIAL DECAY)")
     print("=" * 65)
@@ -647,17 +716,24 @@ def analyze_h4(df: pd.DataFrame, out_tables: str, out_figs: str):
     h4_table = pd.DataFrame(results_h4)
     h4_table.to_csv(os.path.join(out_tables, "h4_results.csv"), index=False)
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6.5), constrained_layout=True)
     ax1 = axes[0]
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
     for i, alpha in enumerate(alphas):
         subset = df[df["alpha_decay_rate"] == alpha]
-        for _, row in subset.head(5).iterrows():
+        for _, row in subset.head(3).iterrows():
             try:
                 ts = json.loads(row["throughput_timeseries"])
                 times = [pt[0] for pt in ts]
                 throughputs = [pt[1] for pt in ts]
-                ax1.plot(times, throughputs, "-", color=colors[i % len(colors)], alpha=0.2, linewidth=0.8)
+                ax1.plot(
+                    times,
+                    throughputs,
+                    "-",
+                    color=colors[i % len(colors)],
+                    alpha=0.2,
+                    linewidth=0.8,
+                )
             except Exception:
                 continue
         t_theory = np.linspace(0, 10, 100)
@@ -689,17 +765,24 @@ def analyze_h4(df: pd.DataFrame, out_tables: str, out_figs: str):
     ax2.set_title("Fitted vs. Theoretical Decay Rate", fontsize=13, fontweight="bold")
     ax2.legend(fontsize=10)
     ax2.grid(True, alpha=0.3)
-    plt.tight_layout()
     plt.savefig(os.path.join(out_figs, "h4_degradation_analysis.png"), dpi=300, bbox_inches="tight")
+    if show_figures:
+        plt.show()
     plt.close(fig)
     return h4_table
 
 
-def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str):
+def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: bool = True):
     print("=" * 65)
     print("HYPOTHESIS 5: MULTI-MODEL CROSS-VALIDATION")
     print("=" * 65)
     df = df.copy()
+    # Detection-rate error is undefined when no attacks occurred (0/0 at run level).
+    # Exclude those runs to avoid biasing interaction effects at low lambda.
+    df = df[df["total_attacks"] > 0].copy()
+    if df.empty:
+        print("No valid runs with total_attacks > 0 for H5.")
+        return df
     df["theoretical_detection"] = 1 - (1 - df["p_detection"]) ** df["n_packets_per_attack"]
     df["detection_error"] = df["observed_detection_rate"] - df["theoretical_detection"]
     df["detection_error_pct"] = 100 * df["detection_error"] / df["theoretical_detection"]
@@ -710,8 +793,9 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str):
     interaction.to_csv(os.path.join(out_tables, "h5_interaction_table.csv"))
 
     pivot = df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
-    fig, ax = plt.subplots(figsize=(10, 6))
-    im = ax.imshow(pivot.values, cmap="RdBu_r", aspect="auto", vmin=-0.15, vmax=0.15)
+    fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
+    vmax = max(0.05, float(np.nanmax(np.abs(pivot.values))))
+    im = ax.imshow(pivot.values, cmap="RdBu_r", aspect="auto", vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels([f"{v:.1f}" for v in pivot.columns])
     ax.set_yticks(range(len(pivot.index)))
@@ -730,11 +814,12 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str):
             color = "white" if abs(val) > 0.08 else "black"
             ax.text(j, i, f"{val:+.3f}", ha="center", va="center", color=color, fontsize=10, fontweight="bold")
     plt.colorbar(im, ax=ax, label="Prediction Error", shrink=0.8)
-    plt.tight_layout()
     plt.savefig(os.path.join(out_figs, "h5_error_heatmap.png"), dpi=300, bbox_inches="tight")
+    if show_figures:
+        plt.show()
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
     for i, p in enumerate(sorted(df["p_detection"].unique())):
         sub = df[df["p_detection"] == p]
@@ -758,8 +843,9 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str):
     ax.set_title("Interaction Plot: IDS Quality x Attack Rate", fontsize=13, fontweight="bold")
     ax.legend(title="IDS Quality", fontsize=10)
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
     plt.savefig(os.path.join(out_figs, "h5_interaction_plot.png"), dpi=300, bbox_inches="tight")
+    if show_figures:
+        plt.show()
     plt.close(fig)
     return df
 
@@ -792,7 +878,7 @@ def effect_sizes_h1(df: pd.DataFrame, out_tables: str):
                 if abs(d) < 0.8
                 else "LARGE"
             )
-            print(f"p={p:.2f}, n={n:3d}: d = {d:+.3f} ({label})")
+            print(f"p={p:.2f}, n={int(n):3d}: d = {d:+.3f} ({label})")
             rows.append({"p": p, "n": n, "cohens_d": d, "magnitude": label})
     out = pd.DataFrame(rows)
     out.to_csv(os.path.join(out_tables, "h1_effect_sizes.csv"), index=False)
@@ -815,8 +901,8 @@ def bonferroni_summary(out_tables: str):
     return alpha_corrected
 
 
-def forest_plot_h1(df: pd.DataFrame, out_figs: str):
-    fig, ax = plt.subplots(figsize=(10, 8))
+def forest_plot_h1(df: pd.DataFrame, out_figs: str, show_figures: bool = True):
+    fig, ax = plt.subplots(figsize=(11, 8.5), constrained_layout=True)
     labels = []
     y_positions = []
     pos = 0
@@ -859,8 +945,9 @@ def forest_plot_h1(df: pd.DataFrame, out_figs: str):
     )
     ax.axvline(x=1.0, color="gray", linestyle=":", alpha=0.3)
     ax.grid(True, axis="x", alpha=0.3)
-    plt.tight_layout()
     plt.savefig(os.path.join(out_figs, "h1_forest_plot.png"), dpi=300, bbox_inches="tight")
+    if show_figures:
+        plt.show()
     plt.close(fig)
 
 
@@ -903,15 +990,15 @@ def run_full_analysis(cfg: Phase3Config):
     out_tables = os.path.join(cfg.analysis_dir, "tables")
     out_figs = os.path.join(cfg.analysis_dir, "figures")
 
-    h1_table = analyze_h1(df, out_tables, out_figs)
+    h1_table = analyze_h1(df, out_tables, out_figs, show_figures=cfg.show_figures)
     _ = h1_table
-    analyze_h2(df, out_tables, out_figs)
-    analyze_h3(df, out_tables, out_figs)
-    analyze_h4(df, out_tables, out_figs)
-    df_h5 = analyze_h5(df, out_tables, out_figs)
+    analyze_h2(df, out_tables, out_figs, show_figures=cfg.show_figures)
+    analyze_h3(df, out_tables, out_figs, show_figures=cfg.show_figures)
+    analyze_h4(df, out_tables, out_figs, show_figures=cfg.show_figures)
+    df_h5 = analyze_h5(df, out_tables, out_figs, show_figures=cfg.show_figures)
     effect_sizes_h1(df_h5, out_tables)
     bonferroni_summary(out_tables)
-    forest_plot_h1(df_h5, out_figs)
+    forest_plot_h1(df_h5, out_figs, show_figures=cfg.show_figures)
     print("Analysis complete. See analysis/figures and analysis/tables.")
 
 

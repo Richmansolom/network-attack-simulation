@@ -34,15 +34,19 @@ class MetricsCollector:
         return pd.DataFrame(self.metrics_history)
 
     def get_summary_stats(self) -> dict:
-        """Return summary statistics from the last sample (for Phase 3 experiments)."""
+        """Return run summary with Phase 3-aligned field names.
+
+        Keys follow the Phase 3 results schema where possible.
+        """
         if not self.metrics_history:
             return {}
         last = self.metrics_history[-1]
         return {
-            "final_detection_rate": last["detection_rate"],
-            "final_drop_rate": last["drop_rate"],
-            "total_detections": last["total_detections"],
-            "attacks_generated": last["attacks_generated"],
+            "observed_packet_detection_rate": last["detection_rate"],
+            "drop_rate": last["drop_rate"],
+            "total_detected": last["total_detections"],
+            "total_attacks": last["attacks_generated"],
             "final_buffer_utilization": last["buffer_utilization"],
+            "final_throughput": last["throughput_mbps"],
         }
 

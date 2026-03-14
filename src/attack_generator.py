@@ -14,6 +14,7 @@ class AttackGenerator:
         self.attack_rate = attack_rate
         self.packets_per_attack = packets_per_attack
         self.attacks_generated = 0
+        self.last_inter_arrivals: List[float] = []
 
     def generate_attack_times(self, start_time: float, duration: float) -> List[float]:
         """
@@ -22,11 +23,13 @@ class AttackGenerator:
             List of attack times in [start_time, start_time + duration]
         """
         attack_times: List[float] = []
+        self.last_inter_arrivals = []
         current_time = start_time
         end_time = start_time + duration
         while current_time < end_time:
             # Inter-arrival time follows Exponential(λ)
             inter_arrival = np.random.exponential(1.0 / self.attack_rate)
+            self.last_inter_arrivals.append(float(inter_arrival))
             current_time += inter_arrival
             if current_time < end_time:
                 attack_times.append(current_time)

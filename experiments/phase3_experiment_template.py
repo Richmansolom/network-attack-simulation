@@ -42,4 +42,4 @@ df.to_csv(f"{EXPERIMENT_NAME}_results.csv", index=False)
 
 # Analyze
 grouped = df.groupby(["p", "lambda"])
-print(grouped["final_detection_rate"].mean())
+print(grouped["observed_packet_detection_rate"].mean())

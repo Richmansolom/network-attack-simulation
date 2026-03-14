@@ -1,0 +1,4 @@
+metric,value
+n_hypotheses,5.0
+alpha_original,0.05
+alpha_corrected,0.01

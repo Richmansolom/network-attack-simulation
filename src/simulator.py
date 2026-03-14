@@ -176,9 +176,9 @@ class NetworkAttackSimulation:
             total_detected / total_attacks if total_attacks > 0 else 0.0
         )
 
-        inter_arrival_times = []
-        if len(self.attack_times_min) > 1:
-            inter_arrival_times = np.diff(self.attack_times_min).astype(float).tolist()
+        # Use raw sampled inter-arrivals from the generator to avoid
+        # finite-window censoring bias when validating H3.
+        inter_arrival_times = list(getattr(self.attack_gen, "last_inter_arrivals", []))
         mean_inter_arrival_time = (
             float(np.mean(inter_arrival_times)) if inter_arrival_times else 0.0
         )

@@ -27,3 +27,18 @@ jobs:
       - name: Run tests
         run: |
           pytest
+
+      - name: Generate Phase 3 CSV outputs (synthetic)
+        env:
+          PYTHONPATH: .
+        run: |
+          python -c "import phase3_analysis as p; cfg=p.Phase3Config(); cfg.run_synthetic=False; cfg.run_experiments=False; cfg.run_analysis=False; cfg.show_figures=False; cfg.results_dir='results'; cfg.analysis_dir='analysis'; p.ensure_dirs(cfg); p.generate_synthetic_data(out_csv='results/all_results.csv'); p.run_full_analysis(cfg)"
+
+      - name: Upload CSV artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-csv-artifacts
+          path: |
+            results/*.csv
+            analysis/tables/*.csv
+          if-no-files-found: error
