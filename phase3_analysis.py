@@ -335,10 +335,13 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
             observed = subset["observed_detection_rate"].values
             obs_mean = np.mean(observed)
             obs_std = np.std(observed, ddof=1) if len(observed) > 1 else 0.0
+            n_unique = int(np.unique(observed).size)
+            degenerate = bool(obs_std == 0)
             if obs_std == 0:
-                # Degenerate case: all replications identical
-                t_stat = 0.0
-                p_value = 1.0 if np.isclose(obs_mean, p_theory, atol=1e-6) else 0.0
+                # Degenerate case: all replications identical.
+                # One-sample t-test is not informative when sample variance is zero.
+                t_stat = np.nan
+                p_value = np.nan
             else:
                 t_stat, p_value = stats.ttest_1samp(observed, p_theory)
             se = obs_std / np.sqrt(len(observed)) if len(observed) > 0 else 0.0
@@ -349,6 +352,9 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
                 {
                     "p": p,
                     "n": n,
+                    "n_runs": int(len(observed)),
+                    "n_unique_values": n_unique,
+                    "degenerate": degenerate,
                     "theoretical": p_theory,
                     "observed_mean": obs_mean,
                     "observed_std": obs_std,
@@ -360,12 +366,17 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
                     "p_value": p_value,
                 }
             )
-            status = "MATCH" if p_value >= 0.05 else "DIFFERS"
+            if degenerate:
+                status = "SATURATED" if np.isclose(obs_mean, p_theory, atol=1e-6) else "DEGENERATE_MISMATCH"
+                p_display = "nan"
+            else:
+                status = "MATCH" if p_value >= 0.05 else "DIFFERS"
+                p_display = f"{p_value:.4f}"
             n_int = int(n)
             print(
-                f"p={p:.2f}, n={n_int:3d}: theory={p_theory:.4f}, "
+                f"p={p:.2f}, n={n_int:3d}: theory={p_theory:.8f}, "
                 f"observed={obs_mean:.4f} +/- {obs_std:.4f}, "
-                f"p-value={p_value:.4f} [{status}]"
+                f"p-value={p_display} [{status}]"
             )
 
     h1_table = pd.DataFrame(results_h1)
@@ -791,12 +802,14 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     interaction.to_csv(os.path.join(out_tables, "h5_interaction_table.csv"))
 
     pivot = df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
+    # Use the same rounded values for both color and labels so they never disagree.
+    pivot_display = pivot.round(3)
     fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
-    abs_max = float(np.nanmax(np.abs(pivot.values)))
-    all_zero_error = np.isclose(abs_max, 0.0)
-    vmax = max(0.05, abs_max)
+    abs_max = float(np.nanmax(np.abs(pivot_display.values)))
+    all_zero_error = np.isclose(abs_max, 0.0, atol=1e-6)
+    vmax = max(0.001, abs_max)
     cmap = "Greys" if all_zero_error else "RdBu_r"
-    im = ax.imshow(pivot.values, cmap=cmap, aspect="auto", vmin=-vmax, vmax=vmax)
+    im = ax.imshow(pivot_display.values, cmap=cmap, aspect="auto", vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels([f"{v:.1f}" for v in pivot.columns])
     ax.set_yticks(range(len(pivot.index)))
@@ -822,7 +835,7 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
         )
     for i in range(len(pivot.index)):
         for j in range(len(pivot.columns)):
-            val = pivot.values[i, j]
+            val = pivot_display.values[i, j]
             color = "white" if abs(val) > 0.08 else "black"
             ax.text(j, i, f"{val:+.3f}", ha="center", va="center", color=color, fontsize=10, fontweight="bold")
     plt.colorbar(im, ax=ax, label="Prediction Error", shrink=0.8)
@@ -987,6 +1000,10 @@ def run_quality_check(results_file: str):
         print(
             f" Detection rate: {sample['observed_detection_rate'].mean():.3f} "
             f"+/- {sample['observed_detection_rate'].std():.3f}"
+        )
+        print(
+            f" Packet detection rate: {sample['observed_packet_detection_rate'].mean():.3f} "
+            f"+/- {sample['observed_packet_detection_rate'].std():.3f}"
         )
         print(
             f" Total attacks: {sample['total_attacks'].mean():.1f} "
