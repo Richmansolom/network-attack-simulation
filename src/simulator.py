@@ -1,5 +1,5 @@
 import heapq
-from typing import List, Any
+from typing import List
 
 import numpy as np
 import random

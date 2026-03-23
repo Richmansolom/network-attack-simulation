@@ -667,7 +667,6 @@ def analyze_h4(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     for alpha_theory in alphas:
         subset = df[df["alpha_decay_rate"] == alpha_theory]
         fitted_alphas = []
-        fitted_T0s = []
         r_squared_values = []
         for _, row in subset.iterrows():
             try:
@@ -693,7 +692,6 @@ def analyze_h4(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
                 ss_tot = np.sum((throughputs - np.mean(throughputs)) ** 2)
                 r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
                 fitted_alphas.append(float(fitted_alpha))
-                fitted_T0s.append(float(fitted_T0))
                 r_squared_values.append(float(r2))
             except RuntimeError:
                 continue
@@ -1027,8 +1025,7 @@ def run_full_analysis(cfg: Phase3Config):
     out_tables = os.path.join(cfg.analysis_dir, "tables")
     out_figs = os.path.join(cfg.analysis_dir, "figures")
 
-    h1_table = analyze_h1(df, out_tables, out_figs, show_figures=cfg.show_figures)
-    _ = h1_table
+    analyze_h1(df, out_tables, out_figs, show_figures=cfg.show_figures)
     analyze_h2(df, out_tables, out_figs, show_figures=cfg.show_figures)
     analyze_h3(df, out_tables, out_figs, show_figures=cfg.show_figures)
     analyze_h4(df, out_tables, out_figs, show_figures=cfg.show_figures)
@@ -1050,8 +1047,7 @@ def main():
         generate_synthetic_data(out_csv=os.path.join(cfg.results_dir, "all_results.csv"))
 
     print("\n[Part 1] Building experiment matrix...")
-    plan = build_experiment_plan(cfg)
-    _ = plan
+    build_experiment_plan(cfg)
 
     if cfg.run_experiments:
         print("\n[Part 2] Running experiments...")
