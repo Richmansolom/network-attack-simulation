@@ -6,3 +6,8 @@ htmlcov/
 *.egg-info/
 venv/
 .env
+
+# Local demo / scratch runs (not CI artifacts)
+results_demo/
+analysis_demo/
+experiment_plan_demo.csv

@@ -27,6 +27,19 @@ from src.simulator import NetworkAttackSimulation
 plt.style.use("seaborn-v0_8-whitegrid")
 
 
+def default_detection_prob_levels(
+    lo: float = 0.1, hi: float = 0.95, step: float = 0.05
+) -> list:
+    """Default grid for H1 supplement only (p not in main guide factorial)."""
+    lo, hi, step = float(lo), float(hi), float(step)
+    if not (0.0 < lo < hi < 1.0) or step <= 0:
+        raise ValueError("default_detection_prob_levels requires 0 < lo < hi < 1 and step > 0")
+    n = int(np.round((hi - lo) / step)) + 1
+    vals = lo + step * np.arange(n, dtype=float)
+    vals = np.clip(vals, lo, hi)
+    return sorted(np.unique(np.round(vals, 4)).tolist())
+
+
 @dataclass
 class Phase3Config:
     detection_probs: list = None
@@ -39,6 +52,15 @@ class Phase3Config:
     experiment_plan_csv: str = "experiment_plan.csv"
     results_dir: str = "results"
     analysis_dir: str = "analysis"
+    # Main factorial uses guide p levels when detection_probs is None (see __post_init__).
+    # H1-only: extra runs for p values in h1_supplement_detection_probs that are not in
+    # detection_probs; results merged only for analyze_h1 / H1 effect sizes / forest plot.
+    run_h1_supplement: bool = True
+    h1_supplement_detection_probs: list = None
+    h1_supplement_experiment_plan_csv: str = "h1_supplement_plan.csv"
+    h1_supplement_results_csv: str = "h1_supplement_results.csv"
+    h1_supplement_lambda: float = 1.0
+    h1_supplement_alpha: float = 0.3
     # === MODIFY THESE VALUES ===
     # Execution switches (set these manually per phase step)
     run_synthetic: bool = False
@@ -50,6 +72,8 @@ class Phase3Config:
     def __post_init__(self):
         if self.detection_probs is None:
             self.detection_probs = [0.70, 0.80, 0.85, 0.90, 0.95]
+        if self.h1_supplement_detection_probs is None:
+            self.h1_supplement_detection_probs = default_detection_prob_levels(0.1, 0.95, 0.05)
         if self.attack_rates is None:
             self.attack_rates = [0.2, 0.5, 1.0, 2.0]
         if self.decay_rates is None:
@@ -161,6 +185,7 @@ def generate_synthetic_data(
 # Section 1: Experiment Matrix
 # ==============================
 def build_experiment_plan(cfg: Phase3Config) -> pd.DataFrame:
+    print(f"Detection probability levels (p): {cfg.detection_probs}")
     conditions = list(
         itertools.product(
             cfg.detection_probs,
@@ -198,18 +223,102 @@ def build_experiment_plan(cfg: Phase3Config) -> pd.DataFrame:
     return plan
 
 
+def build_h1_supplement_plan(cfg: Phase3Config) -> pd.DataFrame:
+    """
+    Extra factorial slice for H1 only: each p not in the main guide grid, crossed with
+    all packets_per_attack, at fixed lambda and alpha.
+    """
+    main_ps = {round(float(x), 6) for x in cfg.detection_probs}
+    extra_ps = sorted(
+        {
+            round(float(p), 4)
+            for p in cfg.h1_supplement_detection_probs
+            if round(float(p), 6) not in main_ps
+        }
+    )
+    if not extra_ps:
+        print(
+            "H1 supplement: no p levels outside main factorial; skipping H1 supplement plan."
+        )
+        return pd.DataFrame()
+
+    conditions = list(
+        itertools.product(
+            extra_ps,
+            [float(cfg.h1_supplement_lambda)],
+            [float(cfg.h1_supplement_alpha)],
+            cfg.packets_per_attack,
+        )
+    )
+    experiments = []
+    run_id = 0
+    seed_offset = 1_000_000
+    for cond_id, (p, lam, alpha, n) in enumerate(conditions):
+        for rep in range(cfg.n_replications):
+            experiments.append(
+                {
+                    "run_id": run_id,
+                    "condition_id": 10_000 + cond_id,
+                    "replication": rep,
+                    "p_detection": p,
+                    "lambda_attack_rate": lam,
+                    "alpha_decay_rate": alpha,
+                    "n_packets_per_attack": n,
+                    "sim_duration_min": cfg.simulation_duration_min,
+                    "random_seed": int(cfg.base_seed) + seed_offset + run_id,
+                }
+            )
+            run_id += 1
+
+    plan = pd.DataFrame(experiments)
+    plan.to_csv(cfg.h1_supplement_experiment_plan_csv, index=False)
+    print(
+        f"H1 supplement: {len(extra_ps)} extra p levels x {len(cfg.packets_per_attack)} n "
+        f"x {cfg.n_replications} reps -> {len(plan)} runs"
+    )
+    print(f"  p values: {extra_ps}")
+    print(
+        f"  fixed lambda={cfg.h1_supplement_lambda}, alpha={cfg.h1_supplement_alpha}"
+    )
+    print(f"  plan saved: {cfg.h1_supplement_experiment_plan_csv}")
+    return plan
+
+
+def run_h1_supplement_experiments(cfg: Phase3Config) -> None:
+    if not cfg.run_h1_supplement:
+        return
+    plan = build_h1_supplement_plan(cfg)
+    if len(plan) == 0:
+        return
+    log_name = "experiment_log_h1_supplement.txt"
+    runner = ExperimentRunner(
+        cfg.h1_supplement_experiment_plan_csv,
+        output_dir=cfg.results_dir,
+        results_filename=cfg.h1_supplement_results_csv,
+        log_file=log_name,
+    )
+    runner.run_all(save_every=50)
+
+
 # ============================
 # Section 2: Experiment Runner
 # ============================
 class ExperimentRunner:
-    def __init__(self, experiment_plan_csv, output_dir="results"):
+    def __init__(
+        self,
+        experiment_plan_csv,
+        output_dir="results",
+        results_filename="all_results.csv",
+        log_file=None,
+    ):
         self.plan = pd.read_csv(experiment_plan_csv)
         self.output_dir = output_dir
-        self.results_file = os.path.join(output_dir, "all_results.csv")
+        self.results_file = os.path.join(output_dir, results_filename)
         os.makedirs(output_dir, exist_ok=True)
 
+        log_name = log_file or "experiment_log.txt"
         logging.basicConfig(
-            filename=os.path.join(output_dir, "experiment_log.txt"),
+            filename=os.path.join(output_dir, log_name),
             level=logging.INFO,
             format="%(asctime)s - %(message)s",
         )
@@ -337,11 +446,20 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
             obs_std = np.std(observed, ddof=1) if len(observed) > 1 else 0.0
             n_unique = int(np.unique(observed).size)
             degenerate = bool(obs_std == 0)
+            test_used = "one_sample_t_test"
             if obs_std == 0:
-                # Degenerate case: all replications identical.
-                # One-sample t-test is not informative when sample variance is zero.
+                # Degenerate case: run-level rates are constant.
+                # Use exact binomial test over pooled attack outcomes.
+                test_used = "exact_binomial_fallback"
                 t_stat = np.nan
-                p_value = np.nan
+                total_successes = int(subset["total_detected"].sum())
+                total_trials = int(subset["total_attacks"].sum())
+                if total_trials > 0:
+                    p_value = float(
+                        stats.binomtest(total_successes, total_trials, p_theory, alternative="two-sided").pvalue
+                    )
+                else:
+                    p_value = np.nan
             else:
                 t_stat, p_value = stats.ttest_1samp(observed, p_theory)
             se = obs_std / np.sqrt(len(observed)) if len(observed) > 0 else 0.0
@@ -355,6 +473,7 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
                     "n_runs": int(len(observed)),
                     "n_unique_values": n_unique,
                     "degenerate": degenerate,
+                    "test_used": test_used,
                     "theoretical": p_theory,
                     "observed_mean": obs_mean,
                     "observed_std": obs_std,
@@ -366,27 +485,22 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
                     "p_value": p_value,
                 }
             )
-            if degenerate:
-                status = "SATURATED" if np.isclose(obs_mean, p_theory, atol=1e-6) else "DEGENERATE_MISMATCH"
-                p_display = "nan"
-            else:
-                status = "MATCH" if p_value >= 0.05 else "DIFFERS"
-                p_display = f"{p_value:.4f}"
+            status = "MATCH" if np.isfinite(p_value) and p_value >= 0.05 else "DIFFERS"
+            p_display = f"{p_value:.4f}" if np.isfinite(p_value) else "nan"
             n_int = int(n)
             print(
                 f"p={p:.2f}, n={n_int:3d}: theory={p_theory:.8f}, "
                 f"observed={obs_mean:.4f} +/- {obs_std:.4f}, "
-                f"p-value={p_display} [{status}]"
+                f"p-value={p_display}, test={test_used} [{status}]"
             )
 
     h1_table = pd.DataFrame(results_h1)
     h1_table.to_csv(os.path.join(out_tables, "h1_results.csv"), index=False)
 
-    fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(10, 7))
     n_range = np.arange(1, 105)
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
-    n_levels = sorted(df["n_packets_per_attack"].unique())
-    y_values = []
+    n_levels = df["n_packets_per_attack"].unique()
 
     for i, p in enumerate(sorted(df["p_detection"].unique())):
         theory_curve = 1 - (1 - p) ** n_range
@@ -398,7 +512,6 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
             linewidth=2,
             label=f"Theory p={p:.2f}",
         )
-        y_values.extend(theory_curve.tolist())
         for n in n_levels:
             subset = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
             if len(subset) == 0:
@@ -418,34 +531,25 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
                 markeredgecolor="black",
                 markeredgewidth=0.5,
             )
-            y_values.append(float(obs_mean))
-            y_values.append(float(obs_mean - yerr))
-            y_values.append(float(obs_mean + yerr))
 
-    ax.set_ylabel("P(Detect at Least 1 Packet)", fontsize=12)
-    ax.set_xlabel("Packets per Attack (n)", fontsize=12)
+    ax.set_xlabel("Packets per Attack (n)", fontsize=13)
+    ax.set_ylabel("P(Detect at Least 1 Packet)", fontsize=13)
     ax.set_title(
         "Hypothesis 1: Theoretical vs. Simulated Detection Probability",
-        fontsize=16,
+        fontsize=14,
         fontweight="bold",
     )
-    # Adaptive y-limits keep a single-plot view readable when values are near 1.0.
-    y_min = max(0.0, min(y_values) - 0.03) if y_values else 0.0
-    y_max = min(1.02, max(y_values) + 0.01) if y_values else 1.02
-    if y_min > 0.85:
-        y_min = max(0.85, y_min)
-    else:
-        y_min = 0.0
-    ax.set_ylim(y_min, y_max)
-    ax.set_xticks(n_levels)
-    ax.grid(True, alpha=0.3)
     ax.legend(fontsize=10, loc="lower right")
+    ax.set_ylim(-0.05, 1.05)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
 
     plt.savefig(os.path.join(out_figs, "h1_detection_overlay.png"), dpi=300, bbox_inches="tight")
     if show_figures:
         plt.show()
     else:
         plt.close(fig)
+    print("Figure saved: h1_detection_overlay.png")
     return h1_table
 
 
@@ -799,6 +903,38 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     print(interaction.to_string())
     interaction.to_csv(os.path.join(out_tables, "h5_interaction_table.csv"))
 
+    # ANOVA summary to align with guide's "ANOVA + interaction plots" wording.
+    anova_rows = []
+    for p in sorted(df["p_detection"].unique()):
+        sub = df[df["p_detection"] == p]
+        groups = [g["detection_error"].values for _, g in sub.groupby("lambda_attack_rate")]
+        if len(groups) >= 2 and all(len(g) > 1 for g in groups):
+            f_stat, p_val = stats.f_oneway(*groups)
+            anova_rows.append(
+                {
+                    "analysis": "lambda_effect_within_p",
+                    "p_detection": p,
+                    "f_statistic": float(f_stat),
+                    "p_value": float(p_val),
+                }
+            )
+    for lam in sorted(df["lambda_attack_rate"].unique()):
+        sub = df[df["lambda_attack_rate"] == lam]
+        groups = [g["detection_error"].values for _, g in sub.groupby("p_detection")]
+        if len(groups) >= 2 and all(len(g) > 1 for g in groups):
+            f_stat, p_val = stats.f_oneway(*groups)
+            anova_rows.append(
+                {
+                    "analysis": "p_effect_within_lambda",
+                    "lambda_attack_rate": lam,
+                    "f_statistic": float(f_stat),
+                    "p_value": float(p_val),
+                }
+            )
+    if anova_rows:
+        anova_df = pd.DataFrame(anova_rows)
+        anova_df.to_csv(os.path.join(out_tables, "h5_anova_summary.csv"), index=False)
+
     pivot = df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
     # Use the same rounded values for both color and labels so they never disagree.
     pivot_display = pivot.round(3)
@@ -806,7 +942,7 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     abs_max = float(np.nanmax(np.abs(pivot_display.values)))
     all_zero_error = np.isclose(abs_max, 0.0, atol=1e-6)
     vmax = max(0.001, abs_max)
-    cmap = "Greys" if all_zero_error else "RdBu_r"
+    cmap = "Blues" if all_zero_error else "RdBu_r"
     im = ax.imshow(pivot_display.values, cmap=cmap, aspect="auto", vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels([f"{v:.1f}" for v in pivot.columns])
@@ -1021,18 +1157,30 @@ def run_full_analysis(cfg: Phase3Config):
         raise FileNotFoundError(
             f"{results_file} not found. Run experiments first or set run_synthetic=True."
         )
-    df = pd.read_csv(results_file)
+    df_main = pd.read_csv(results_file)
+    supp_path = os.path.join(cfg.results_dir, cfg.h1_supplement_results_csv)
+    if os.path.exists(supp_path):
+        df_sup = pd.read_csv(supp_path)
+        df_h1 = pd.concat([df_main, df_sup], ignore_index=True)
+        print(
+            f"H1 analysis: main factorial ({len(df_main)} runs) + "
+            f"H1 supplement ({len(df_sup)} runs)."
+        )
+    else:
+        df_h1 = df_main
+        print("H1 supplement results not found; H1 uses main factorial only.")
+
     out_tables = os.path.join(cfg.analysis_dir, "tables")
     out_figs = os.path.join(cfg.analysis_dir, "figures")
 
-    analyze_h1(df, out_tables, out_figs, show_figures=cfg.show_figures)
-    analyze_h2(df, out_tables, out_figs, show_figures=cfg.show_figures)
-    analyze_h3(df, out_tables, out_figs, show_figures=cfg.show_figures)
-    analyze_h4(df, out_tables, out_figs, show_figures=cfg.show_figures)
-    df_h5 = analyze_h5(df, out_tables, out_figs, show_figures=cfg.show_figures)
-    effect_sizes_h1(df_h5, out_tables)
+    analyze_h1(df_h1, out_tables, out_figs, show_figures=cfg.show_figures)
+    analyze_h2(df_main, out_tables, out_figs, show_figures=cfg.show_figures)
+    analyze_h3(df_main, out_tables, out_figs, show_figures=cfg.show_figures)
+    analyze_h4(df_main, out_tables, out_figs, show_figures=cfg.show_figures)
+    df_h5 = analyze_h5(df_main, out_tables, out_figs, show_figures=cfg.show_figures)
+    effect_sizes_h1(df_h1, out_tables)
     bonferroni_summary(out_tables)
-    forest_plot_h1(df_h5, out_figs, show_figures=cfg.show_figures)
+    forest_plot_h1(df_h1, out_figs, show_figures=cfg.show_figures)
     print("Analysis complete. See analysis/figures and analysis/tables.")
 
 
@@ -1053,6 +1201,7 @@ def main():
         print("\n[Part 2] Running experiments...")
         runner = ExperimentRunner(cfg.experiment_plan_csv, output_dir=cfg.results_dir)
         runner.run_all(save_every=50)
+        run_h1_supplement_experiments(cfg)
         run_quality_check(os.path.join(cfg.results_dir, "all_results.csv"))
 
     if cfg.run_analysis:
