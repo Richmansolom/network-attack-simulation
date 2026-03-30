@@ -34,10 +34,7 @@ class MetricsCollector:
         return pd.DataFrame(self.metrics_history)
 
     def get_summary_stats(self) -> dict:
-        """Return run summary with Phase 3-aligned field names.
-
-        Keys follow the Phase 3 results schema where possible.
-        """
+        """Return run summary field names for experiment outputs."""
         if not self.metrics_history:
             return {}
         last = self.metrics_history[-1]

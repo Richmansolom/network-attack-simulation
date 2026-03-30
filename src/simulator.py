@@ -78,7 +78,7 @@ class NetworkAttackSimulation:
         self.metrics = MetricsCollector(
             sampling_interval=config["simulation"]["sampling_interval"]
         )
-        # Phase 3 tracking state
+        # Run-level tracking state
         self.attack_times_min: List[float] = []
         self.attack_detected = {}
         # Register event handlers
@@ -152,8 +152,8 @@ class NetworkAttackSimulation:
         """Handle metrics sampling event"""
         self.metrics.collect(event.time, self.network, self.ids, self.attack_gen)
 
-    def get_phase3_summary(self) -> dict:
-        """Return run-level outputs required by the Phase 3 data dictionary."""
+    def get_run_summary(self) -> dict:
+        """Return run-level outputs used by experiment scripts."""
         df = self.metrics.get_dataframe()
         if df.empty:
             return {
