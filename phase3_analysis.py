@@ -940,14 +940,12 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
         anova_df.to_csv(os.path.join(out_tables, "h5_anova_summary.csv"), index=False)
 
     pivot = df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
-    # Use the same rounded values for both color and labels so they never disagree.
-    pivot_display = pivot.round(3)
     fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
-    abs_max = float(np.nanmax(np.abs(pivot_display.values)))
-    all_zero_error = np.isclose(abs_max, 0.0, atol=1e-6)
-    vmax = max(0.001, abs_max)
-    cmap = "Blues" if all_zero_error else "RdBu_r"
-    im = ax.imshow(pivot_display.values, cmap=cmap, aspect="auto", vmin=-vmax, vmax=vmax)
+    abs_max = float(np.nanmax(np.abs(pivot.values)))
+    all_zero_error = np.isclose(abs_max, 0.0)
+    vmax = max(0.05, abs_max)
+    cmap = "Greys" if all_zero_error else "RdBu_r"
+    im = ax.imshow(pivot.values, cmap=cmap, aspect="auto", vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels([f"{v:.1f}" for v in pivot.columns])
     ax.set_yticks(range(len(pivot.index)))
@@ -973,7 +971,7 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
         )
     for i in range(len(pivot.index)):
         for j in range(len(pivot.columns)):
-            val = pivot_display.values[i, j]
+            val = pivot.values[i, j]
             color = "white" if abs(val) > 0.08 else "black"
             ax.text(j, i, f"{val:+.3f}", ha="center", va="center", color=color, fontsize=10, fontweight="bold")
     plt.colorbar(im, ax=ax, label="Prediction Error", shrink=0.8)
