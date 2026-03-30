@@ -23,8 +23,8 @@ config = {
     "simulation": {"duration_minutes": 10, "sampling_interval": 1.0},
 }
 
-# False: Phase 3 guide factorial p (5 levels, fast). True: abstract / H1-style grid p=0.30–0.95 step 0.05 (14 levels; many more runs).
-USE_H1_RANGE = False
+# True (default): abstract / H1-style grid p=0.30–0.95 step 0.05 (14 levels). False: guide factorial p only (5 levels, faster).
+USE_H1_RANGE = True
 
 # Configuration (Poisson λ from tables)
 EXPERIMENT_NAME = "detection_vs_load"
