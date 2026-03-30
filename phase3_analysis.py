@@ -37,8 +37,26 @@ from src.simulator import NetworkAttackSimulation
 
 plt.style.use("seaborn-v0_8-whitegrid")
 
+# Full H1 p table (kept here exactly as requested for reference/selection).
+GUIDE_FACTORIAL_DETECTION_PROBS_ALL = [
+    0.30,
+    0.35,
+    0.40,
+    0.45,
+    0.50,
+    0.55,
+    0.60,
+    0.65,
+    0.70,
+    0.75,
+    0.80,
+    0.85,
+    0.90,
+    0.95,
+]
+
 # Standard Phase 3 factorial: 5 p x 4 x 3 x 4 = 240 conditions (30 reps -> 7,200 runs).
-# H1 (binomial): five fixed p levels from 0.30 to 0.95 (replaces legacy 0.70–0.95).
+# Active p levels used for the 7,200-run design.
 GUIDE_FACTORIAL_DETECTION_PROBS = [0.30, 0.50, 0.70, 0.85, 0.95]
 
 
@@ -93,7 +111,7 @@ def generate_synthetic_data(
     out_csv="synthetic_results.csv",
 ):
     if detection_probs is None:
-        detection_probs = [0.30, 0.70, 0.95]
+        detection_probs = [0.30, 0.60, 0.95]
     if attack_rates is None:
         attack_rates = [0.5, 1.0, 2.0]
     if decay_rates is None:
@@ -248,6 +266,50 @@ class ExperimentRunner:
         if os.path.exists(self.results_file):
             self.existing = pd.read_csv(self.results_file)
             self.completed_ids = set(self.existing["run_id"].values)
+
+            # Guard against stale resumptions: if the experiment plan changed
+            # for an existing run_id, force that run_id to be recomputed.
+            key_cols = [
+                "p_detection",
+                "lambda_attack_rate",
+                "alpha_decay_rate",
+                "n_packets_per_attack",
+                "sim_duration_min",
+                "random_seed",
+            ]
+            if all(col in self.existing.columns for col in ["run_id", *key_cols]):
+                plan_keys = self.plan[["run_id", *key_cols]].drop_duplicates("run_id").set_index("run_id")
+                existing_keys = (
+                    self.existing[["run_id", *key_cols]]
+                    .drop_duplicates("run_id")
+                    .set_index("run_id")
+                )
+                common_ids = plan_keys.index.intersection(existing_keys.index)
+                mismatch_mask = pd.Series(False, index=common_ids)
+
+                for col in key_cols:
+                    plan_vals = plan_keys.loc[common_ids, col]
+                    existing_vals = existing_keys.loc[common_ids, col]
+                    if pd.api.types.is_numeric_dtype(plan_vals) and pd.api.types.is_numeric_dtype(existing_vals):
+                        mismatch = ~np.isclose(
+                            plan_vals.astype(float).values,
+                            existing_vals.astype(float).values,
+                            atol=1e-12,
+                        )
+                        mismatch_mask = mismatch_mask | pd.Series(mismatch, index=common_ids)
+                    else:
+                        mismatch_mask = mismatch_mask | (plan_vals.astype(str) != existing_vals.astype(str))
+
+                mismatch_ids = set(mismatch_mask[mismatch_mask].index.tolist())
+                if mismatch_ids:
+                    print(
+                        "Detected stale completed runs with changed plan parameters: "
+                        f"{len(mismatch_ids)} run_ids will be recomputed."
+                    )
+                    self.existing = self.existing[~self.existing["run_id"].isin(mismatch_ids)]
+                    self.existing.to_csv(self.results_file, index=False)
+                    self.completed_ids = set(self.existing["run_id"].values)
+
             print(f"Resuming: {len(self.completed_ids)} runs already completed")
         else:
             self.existing = pd.DataFrame()
