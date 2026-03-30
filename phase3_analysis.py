@@ -28,9 +28,9 @@ plt.style.use("seaborn-v0_8-whitegrid")
 
 
 def default_detection_prob_levels(
-    lo: float = 0.1, hi: float = 0.95, step: float = 0.05
+    lo: float = 0.3, hi: float = 0.95, step: float = 0.05
 ) -> list:
-    """Default grid for H1 supplement only (p not in main guide factorial)."""
+    """Arithmetic p grid for H1 supplement (default lo=0.30 matches abstract; not 0.10-0.95)."""
     lo, hi, step = float(lo), float(hi), float(step)
     if not (0.0 < lo < hi < 1.0) or step <= 0:
         raise ValueError("default_detection_prob_levels requires 0 < lo < hi < 1 and step > 0")
@@ -54,7 +54,8 @@ class Phase3Config:
     analysis_dir: str = "analysis"
     # Main factorial uses guide p levels when detection_probs is None (see __post_init__).
     # H1-only: extra runs for p values in h1_supplement_detection_probs that are not in
-    # detection_probs; results merged only for analyze_h1 / H1 effect sizes / forest plot.
+    # detection_probs (default grid 0.30-0.95 step 0.05, aligned with abstract); merged
+    # only for analyze_h1 / H1 effect sizes / forest plot.
     run_h1_supplement: bool = True
     h1_supplement_detection_probs: list = None
     h1_supplement_experiment_plan_csv: str = "h1_supplement_plan.csv"
@@ -73,7 +74,7 @@ class Phase3Config:
         if self.detection_probs is None:
             self.detection_probs = [0.70, 0.80, 0.85, 0.90, 0.95]
         if self.h1_supplement_detection_probs is None:
-            self.h1_supplement_detection_probs = default_detection_prob_levels(0.1, 0.95, 0.05)
+            self.h1_supplement_detection_probs = default_detection_prob_levels(0.3, 0.95, 0.05)
         if self.attack_rates is None:
             self.attack_rates = [0.2, 0.5, 1.0, 2.0]
         if self.decay_rates is None:
