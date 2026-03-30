@@ -21,7 +21,7 @@ Does the network attack simulation match the theoretical Binomial, Poisson, Expo
   H1: Combined prediction error shows interaction effects.
 
 ## Parameter Levels
-- `p_detection`: `[0.70, 0.80, 0.85, 0.90, 0.95]`
+- `p_detection`: **`[0.30, 0.50, 0.70, 0.85, 0.95]`** (H1 binomial factorial; `GUIDE_FACTORIAL_DETECTION_PROBS`) — × 4 λ × 3 α × 4 n = **240** conditions × 30 = **7,200** runs
 - `lambda_attack_rate`: `[0.2, 0.5, 1.0, 2.0]`
 - `alpha_decay_rate`: `[0.1, 0.3, 0.5]`
 - `n_packets_per_attack`: `[10, 25, 50, 100]`

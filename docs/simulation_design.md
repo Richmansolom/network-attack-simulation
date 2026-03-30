@@ -6,7 +6,7 @@ This document will describe the architecture and design decisions for the networ
 
 | Source | Parameter | Values Used |
 |--------|-----------|-------------|
-| **Binomial** | p (detection_prob) | 0.30, 0.45, 0.55, 0.70, 0.85, 0.90, 0.95 |
+| **Binomial** | p (detection_prob) | **Phase 3 standard factorial (H1)** uses **5 levels**: **0.30, 0.50, 0.70, 0.85, 0.95** (`GUIDE_FACTORIAL_DETECTION_PROBS`; replaces legacy **0.70–0.95**) |
 | **Binomial** | n (packets_per_attack) | 10, 50 |
 | **Poisson** | λ (attack rate/min) | 0.1, 0.5, 1.0 |
 | **Poisson** | t (duration) | 10 min |

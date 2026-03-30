@@ -63,7 +63,9 @@ Phase 3 writes **guide-aligned figures** under `analysis/figures/`:
 | `h5_interaction_plot.png` | H5 — detection vs λ by p |
 | `h1_forest_plot.png` | H1 — forest plot (observed vs theory, CIs) |
 
-Tables are under `analysis/tables/` (e.g. `h1_results.csv`, …). The factorial uses **guide defaults** in `Phase3Config` (`p` = 0.70–0.95, etc.); override `detection_probs` only if your handout specifies different levels.
+Tables are under `analysis/tables/` (e.g. `h1_results.csv`, …).
+
+**Standard design:** `5 p × 4 λ × 3 α × 4 n = 240` conditions × `30` = **7,200** runs. Default **`p`** for H1: **`[0.30, 0.50, 0.70, 0.85, 0.95]`** (`GUIDE_FACTORIAL_DETECTION_PROBS`; range **0.30–0.95**, not 0.70–0.95). Override `detection_probs` only if your handout differs.
 
 On Windows PowerShell, if `src` import errors appear for module-style commands:
 ```powershell

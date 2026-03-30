@@ -16,6 +16,8 @@ Guide-aligned figures (written under analysis/figures/ when run_analysis runs):
   h5_error_heatmap.png       — H5: mean prediction error (IDS × attack rate)
   h5_interaction_plot.png    — H5: detection rate vs λ by p
   h1_forest_plot.png         — H1: observed rates vs theory with CIs
+
+Standard design: 5 p (0.30–0.95 for H1) x 4 lambda x 3 alpha x 4 n = 240 conditions x 30 reps = 7,200 runs (see GUIDE_FACTORIAL_DETECTION_PROBS).
 """
 
 import itertools
@@ -34,6 +36,10 @@ from scipy.optimize import curve_fit
 from src.simulator import NetworkAttackSimulation
 
 plt.style.use("seaborn-v0_8-whitegrid")
+
+# Standard Phase 3 factorial: 5 p x 4 x 3 x 4 = 240 conditions (30 reps -> 7,200 runs).
+# H1 (binomial): five fixed p levels from 0.30 to 0.95 (replaces legacy 0.70–0.95).
+GUIDE_FACTORIAL_DETECTION_PROBS = [0.30, 0.50, 0.70, 0.85, 0.95]
 
 
 @dataclass
@@ -58,7 +64,7 @@ class Phase3Config:
 
     def __post_init__(self):
         if self.detection_probs is None:
-            self.detection_probs = [0.70, 0.80, 0.85, 0.90, 0.95]
+            self.detection_probs = list(GUIDE_FACTORIAL_DETECTION_PROBS)
         if self.attack_rates is None:
             self.attack_rates = [0.2, 0.5, 1.0, 2.0]
         if self.decay_rates is None:
@@ -87,7 +93,7 @@ def generate_synthetic_data(
     out_csv="synthetic_results.csv",
 ):
     if detection_probs is None:
-        detection_probs = [0.70, 0.85, 0.95]
+        detection_probs = [0.30, 0.70, 0.95]
     if attack_rates is None:
         attack_rates = [0.5, 1.0, 2.0]
     if decay_rates is None:
@@ -201,7 +207,15 @@ def build_experiment_plan(cfg: Phase3Config) -> pd.DataFrame:
 
     plan = pd.DataFrame(experiments)
     plan.to_csv(cfg.experiment_plan_csv, index=False)
-    print(f"Number of conditions: {len(conditions)}")
+    n_p, n_l, n_a, n_pkt = (
+        len(cfg.detection_probs),
+        len(cfg.attack_rates),
+        len(cfg.decay_rates),
+        len(cfg.packets_per_attack),
+    )
+    print(f"Number of conditions: {len(conditions)} (= {n_p} p x {n_l} lambda x {n_a} alpha x {n_pkt} n)")
+    if len(conditions) == 240:
+        print("Standard Phase 3 design: 240 conditions x 30 reps = 7,200 runs (when n_replications=30).")
     print(f"Replications per condition: {cfg.n_replications}")
     print(f"Total simulation runs: {len(plan)}")
     print(f"Experiment plan saved: {cfg.experiment_plan_csv}")
@@ -405,52 +419,71 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     h1_table = pd.DataFrame(results_h1)
     h1_table.to_csv(os.path.join(out_tables, "h1_results.csv"), index=False)
 
-    fig, ax = plt.subplots(figsize=(10, 7))
-    n_range = np.arange(1, 105)
-    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
-    n_levels = df["n_packets_per_attack"].unique()
+    p_levels = sorted(df["p_detection"].unique())
+    n_levels = sorted(df["n_packets_per_attack"].unique())
+    n_p = len(p_levels)
+    cmap = plt.cm.viridis
+    p_colors = {
+        p: cmap(i / max(n_p - 1, 1)) for i, p in enumerate(p_levels)
+    }
 
-    for i, p in enumerate(sorted(df["p_detection"].unique())):
+    fig_w = 11 if n_p > 6 else 10
+    fig_h = 7.5 if n_p > 6 else 7
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    n_range = np.arange(1, 105)
+
+    for p in p_levels:
+        c = p_colors[p]
         theory_curve = 1 - (1 - p) ** n_range
         ax.plot(
             n_range,
             theory_curve,
             "-",
-            color=colors[i % len(colors)],
-            linewidth=2,
+            color=c,
+            linewidth=2.0 if n_p <= 8 else 1.6,
+            alpha=0.95,
             label=f"Theory p={p:.2f}",
         )
-        for n in n_levels:
-            subset = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
+        for n_pkt in n_levels:
+            subset = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n_pkt)]
             if len(subset) == 0:
                 continue
             obs_mean = subset["observed_detection_rate"].mean()
             obs_se = subset["observed_detection_rate"].std(ddof=1) / np.sqrt(len(subset))
             yerr = 1.96 * obs_se if np.isfinite(obs_se) else 0
             ax.errorbar(
-                n,
+                n_pkt,
                 obs_mean,
                 yerr=yerr,
                 fmt="o",
-                color=colors[i % len(colors)],
-                markersize=7,
-                capsize=4,
-                capthick=1.2,
-                markeredgecolor="black",
-                markeredgewidth=0.5,
+                color=c,
+                markersize=6 if n_p > 6 else 7,
+                capsize=3,
+                capthick=1.5,
+                markeredgecolor="k",
+                markeredgewidth=0.4,
+                zorder=5,
             )
 
     ax.set_xlabel("Packets per Attack (n)", fontsize=13)
     ax.set_ylabel("P(Detect at Least 1 Packet)", fontsize=13)
     ax.set_title(
-        "Hypothesis 1: Theoretical vs. Simulated Detection Probability",
-        fontsize=14,
+        "Hypothesis 1: Binomial detection — theory vs simulation (p = 0.30–0.95, 240-condition factorial)",
+        fontsize=13,
         fontweight="bold",
     )
-    ax.legend(fontsize=10, loc="lower right")
+    leg = ax.legend(
+        fontsize=7 if n_p > 8 else 8,
+        ncol=2 if n_p > 6 else 1,
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        frameon=True,
+        title="Curves",
+    )
+    leg.get_title().set_fontsize(8)
     ax.set_ylim(-0.05, 1.05)
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
+    fig.tight_layout()
 
     plt.savefig(os.path.join(out_figs, "h1_detection_overlay.png"), dpi=300, bbox_inches="tight")
     if show_figures:
@@ -977,7 +1010,14 @@ def bonferroni_summary(out_tables: str):
 
 
 def forest_plot_h1(df: pd.DataFrame, out_figs: str, show_figures: bool = True):
-    fig, ax = plt.subplots(figsize=(11, 8.5), constrained_layout=True)
+    n_rows = sum(
+        1
+        for p in sorted(df["p_detection"].unique(), reverse=True)
+        for n in sorted(df["n_packets_per_attack"].unique())
+        if len(df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]) > 0
+    )
+    fig_h = max(8.5, min(28.0, 0.22 * n_rows + 2))
+    fig, ax = plt.subplots(figsize=(11, fig_h), constrained_layout=True)
     labels = []
     y_positions = []
     pos = 0
@@ -1066,7 +1106,9 @@ def run_full_analysis(cfg: Phase3Config):
             f"{results_file} not found. Run experiments first or set run_synthetic=True."
         )
     df = pd.read_csv(results_file)
-    print(f"Loaded {len(df)} runs from single factorial (all hypotheses use this dataset).")
+    print(
+        f"Loaded {len(df)} runs (single factorial: all H1-H5 use the same dataset)."
+    )
 
     out_tables = os.path.join(cfg.analysis_dir, "tables")
     out_figs = os.path.join(cfg.analysis_dir, "figures")

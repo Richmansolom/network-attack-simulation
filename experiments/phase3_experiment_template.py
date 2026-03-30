@@ -12,6 +12,7 @@ _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
+from phase3_analysis import GUIDE_FACTORIAL_DETECTION_PROBS
 from src.simulator import NetworkAttackSimulation
 
 # Base configuration (Degradation table: T₀=100, Binomial n=50, Poisson t=10)
@@ -22,10 +23,10 @@ config = {
     "simulation": {"duration_minutes": 10, "sampling_interval": 1.0},
 }
 
-# Configuration (Phase 3 guide factorial p levels; Poisson λ from tables)
+# Configuration (Phase 3 standard factorial: 5 p levels, 0.30–0.95; Poisson λ from tables)
 EXPERIMENT_NAME = "detection_vs_load"
 N_REPLICATIONS = 30
-DETECTION_PROBS = [0.70, 0.80, 0.85, 0.90, 0.95]
+DETECTION_PROBS = list(GUIDE_FACTORIAL_DETECTION_PROBS)
 ATTACK_RATES = [0.1, 0.5, 1.0]  # Poisson: λ=0.1→μ=1, λ=0.5→μ=5, λ=1.0→μ=10 @ t=10min
 
 
