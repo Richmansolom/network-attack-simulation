@@ -7,7 +7,25 @@ htmlcov/
 venv/
 .env
 
-# Local demo / scratch runs (not CI artifacts)
+# Phase 3 generated outputs (folders created by phase3_analysis.ensure_dirs)
+analysis/figures/
+analysis/tables/
+results/*
+!results/.gitkeep
+
+# Experiment plans and one-off exports at repo root
+experiment_plan*.csv
+h1_supplement_plan.csv
+detection_vs_load_results.csv
+
+# Duplicate CI / scratch trees
+analysis_ci_check/
+analysis_fixed/
+results_ci_check/
+results_fixed/
+
+# Local demo runs
 results_demo/
 analysis_demo/
-experiment_plan_demo.csv
+
+docs/*.pdf

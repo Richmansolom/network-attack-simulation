@@ -62,6 +62,9 @@ class Phase3Config:
     h1_supplement_results_csv: str = "h1_supplement_results.csv"
     h1_supplement_lambda: float = 1.0
     h1_supplement_alpha: float = 0.3
+    # H1 tables/figures only: ignore runs with p below this (matches abstract 0.30–0.95;
+    # drops legacy rows e.g. p=0.10–0.25 if still present in all_results.csv).
+    h1_analysis_p_min: float = 0.3
     # === MODIFY THESE VALUES ===
     # Execution switches (set these manually per phase step)
     run_synthetic: bool = False
@@ -1170,6 +1173,19 @@ def run_full_analysis(cfg: Phase3Config):
     else:
         df_h1 = df_main
         print("H1 supplement results not found; H1 uses main factorial only.")
+
+    lo = float(cfg.h1_analysis_p_min)
+    if lo > 0:
+        n_h1_before = len(df_h1)
+        df_h1 = df_h1[df_h1["p_detection"] >= lo - 1e-9].copy()
+        n_h1_after = len(df_h1)
+        if n_h1_after < n_h1_before:
+            print(
+                f"H1: restricted to p >= {lo:.2f} (abstract range); "
+                f"using {n_h1_after} of {n_h1_before} merged rows."
+            )
+        else:
+            print(f"H1: all merged rows already satisfy p >= {lo:.2f}.")
 
     out_tables = os.path.join(cfg.analysis_dir, "tables")
     out_figs = os.path.join(cfg.analysis_dir, "figures")
