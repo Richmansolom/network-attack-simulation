@@ -7,7 +7,7 @@ htmlcov/
 venv/
 .env
 
-# Phase 3 generated outputs (folders created by phase3_analysis.ensure_dirs)
+# Phase 3 generated outputs (created by phase3_analysis.ensure_dirs)
 analysis/figures/
 analysis/tables/
 results/*
@@ -24,8 +24,9 @@ analysis_fixed/
 results_ci_check/
 results_fixed/
 
-# Local demo runs
+# Local demo / scratch runs (not CI artifacts)
 results_demo/
 analysis_demo/
+experiment_plan_demo.csv
 
 docs/*.pdf

@@ -51,6 +51,20 @@ python -m experiments.phase3_experiment_template
 python phase3_analysis.py
 ```
 
+Phase 3 writes **guide-aligned figures** under `analysis/figures/`:
+
+| File | Hypothesis |
+|------|------------|
+| `h1_detection_overlay.png` | H1 — binomial P(detect ≥ 1) vs theory |
+| `h2_poisson_overlay.png` | H2 — Poisson attack counts |
+| `h3_exponential_analysis.png` | H3 — exponential inter-arrivals |
+| `h4_degradation_analysis.png` | H4 — throughput decay |
+| `h5_error_heatmap.png` | H5 — prediction error heatmap |
+| `h5_interaction_plot.png` | H5 — detection vs λ by p |
+| `h1_forest_plot.png` | H1 — forest plot (observed vs theory, CIs) |
+
+Tables are under `analysis/tables/` (e.g. `h1_results.csv`, …). The factorial uses **guide defaults** in `Phase3Config` (`p` = 0.70–0.95, etc.); override `detection_probs` only if your handout specifies different levels.
+
 On Windows PowerShell, if `src` import errors appear for module-style commands:
 ```powershell
 $env:PYTHONPATH='.'
@@ -59,17 +73,15 @@ python "experiments/phase3_experiment_template.py"
 
 ## GitHub Actions artifacts
 
-Large Phase 3 outputs (`results/`, `analysis/figures/`, `analysis/tables/`, experiment plans) are **not** committed to the repo; generate them locally or download from CI.
-
-The workflow runs tests, runs the Phase 3 pipeline, and uploads artifacts.
+The GitHub Actions workflow runs tests, generates Phase 3 synthetic outputs, and uploads artifacts.
 
 Artifact name:
 - `phase3-results-and-figures`
 
-Included files (from the CI run):
-- `results_fixed/*.csv` (or equivalent configured paths)
-- `analysis_fixed/tables/*.csv`
-- `analysis_fixed/figures/*.png`
+Included files:
+- `results/*.csv`
+- `analysis/tables/*.csv`
+- `analysis/figures/*.png`
 
 How to download:
 1. Open your repository on GitHub.
@@ -97,9 +109,8 @@ network-attack-simulation/
 │   └── phase3_experiment_template.py
 ├── data/
 │   └── results/
-├── results/          # generated; only .gitkeep tracked
-├── analysis/         # generated figures/tables; only .gitkeep tracked
-├── reports/
+├── results/
+├── analysis/
 ├── docs/
 │   └── simulation_design.md
 ├── main.py

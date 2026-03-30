@@ -32,7 +32,7 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          python -c "import phase3_analysis as p; cfg=p.Phase3Config(); cfg.run_synthetic=False; cfg.run_experiments=True; cfg.run_analysis=True; cfg.show_figures=False; cfg.results_dir='results_fixed'; cfg.analysis_dir='analysis_fixed'; cfg.experiment_plan_csv='experiment_plan_fixed.csv'; cfg.h1_supplement_experiment_plan_csv='h1_supplement_plan_fixed.csv'; p.ensure_dirs(cfg); p.build_experiment_plan(cfg); r=p.ExperimentRunner(cfg.experiment_plan_csv, output_dir=cfg.results_dir); r.run_all(save_every=50); p.run_h1_supplement_experiments(cfg); p.run_quality_check('results_fixed/all_results.csv'); p.run_full_analysis(cfg)"
+          python -c "import phase3_analysis as p; cfg=p.Phase3Config(); cfg.run_synthetic=False; cfg.run_experiments=True; cfg.run_analysis=True; cfg.show_figures=False; cfg.results_dir='results_fixed'; cfg.analysis_dir='analysis_fixed'; cfg.experiment_plan_csv='experiment_plan_fixed.csv'; p.ensure_dirs(cfg); p.build_experiment_plan(cfg); r=p.ExperimentRunner(cfg.experiment_plan_csv, output_dir=cfg.results_dir); r.run_all(save_every=50); p.run_quality_check('results_fixed/all_results.csv'); p.run_full_analysis(cfg)"
 
       - name: Upload Phase 3 artifacts
         uses: actions/upload-artifact@v4
