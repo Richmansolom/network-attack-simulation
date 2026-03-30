@@ -65,7 +65,7 @@ Phase 3 writes **guide-aligned figures** under `analysis/figures/`:
 
 Tables are under `analysis/tables/` (e.g. `h1_results.csv`, …).
 
-**Standard design:** `5 p × 4 λ × 3 α × 4 n = 240` conditions × `30` = **7,200** runs. Default **`p`** for H1: **`[0.30, 0.50, 0.70, 0.85, 0.95]`** (`GUIDE_FACTORIAL_DETECTION_PROBS`; range **0.30–0.95**, not 0.70–0.95). Override `detection_probs` only if your handout differs.
+**Current design:** `5 p × 4 λ × 3 α × 4 n = 240` conditions × `30` = **7,200** runs. Default **`p`** for H1: **`[0.30, 0.50, 0.70, 0.85, 0.95]`** (`GUIDE_FACTORIAL_DETECTION_PROBS`).
 
 On Windows PowerShell, if `src` import errors appear for module-style commands:
 ```powershell

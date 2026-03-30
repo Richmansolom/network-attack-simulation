@@ -23,7 +23,7 @@ config = {
     "simulation": {"duration_minutes": 10, "sampling_interval": 1.0},
 }
 
-# Configuration (Phase 3 standard factorial: 5 p levels, 0.30–0.95; Poisson λ from tables)
+# Configuration (Standard H1 factorial: 5 p levels from GUIDE_FACTORIAL_DETECTION_PROBS; Poisson λ from tables)
 EXPERIMENT_NAME = "detection_vs_load"
 N_REPLICATIONS = 30
 DETECTION_PROBS = list(GUIDE_FACTORIAL_DETECTION_PROBS)

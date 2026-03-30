@@ -27,7 +27,7 @@ This framework enables reproducible cybersecurity research, allowing researchers
 Real networks mix correlation, saturation, and resource contention; textbook formulas assume cleaner conditions. We implement a Phase 2 discrete-event simulator (event clock, Poisson attack generator, IDS, network with throughput decay, metrics) and a Phase 3 pipeline (full factorial design, 30 replications per condition, five hypotheses H1–H5, effect sizes, Bonferroni correction, figures). The goal is to show where classical stochastic models align with simulation and where finite data, saturation, or load stress the assumptions—especially at low p and high λ.
 
 --- Objective ---
-(1) Deliver a reproducible codebase whose outputs match the Phase 3 data dictionary. (2) Run the standard factorial (5 IDS levels from p = 0.30–0.95 × 4 attack rates × 3 decay rates × 4 packet counts). (3) Test H1–H5 with appropriate statistics and interpret practical vs. statistical significance. (4) Report limitations (e.g., degenerate tests when detection saturates near 1).
+(1) Deliver a reproducible codebase whose outputs match the Phase 3 data dictionary. (2) Run the standard factorial (5 IDS levels p ∈ {0.30, 0.50, 0.70, 0.85, 0.95} × 4 attack rates × 3 decay rates × 4 packet counts). (3) Test H1–H5 with appropriate statistics and interpret practical vs. statistical significance. (4) Report limitations (e.g., degenerate tests when detection saturates near 1).
 
 
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
@@ -35,7 +35,7 @@ COLUMN 2  (Hypothesis: three blocks; then Methods at bottom)
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 --- Hypothesis — Block 1 (H1) ---
-H1 (Binomial detection at the attack level). For n independent packet inspections per attack with per-packet detection probability p, the probability of detecting at least one malicious packet is P = 1 − (1 − p)^n. We compare simulated attack-level detection rates to this value for each (p, n). The main factorial uses five fixed levels of p (0.30, 0.50, 0.70, 0.85, 0.95) crossed with all other factors (same 240-condition design as H2–H5). Where replications are degenerate (zero variance), we use an exact binomial test on pooled successes and trials.
+H1 (Binomial detection at the attack level). For n independent packet inspections per attack with per-packet detection probability p, the probability of detecting at least one malicious packet is P = 1 − (1 − p)^n. We compare simulated attack-level detection rates to this value for each (p, n). The main factorial uses five guide levels of p (0.30, 0.50, 0.70, 0.85, 0.95) crossed with all other factors (same dataset for H2–H5). Where replications are degenerate (zero variance), we use an exact binomial test on pooled successes and trials.
 
 --- Hypothesis — Block 2 (H2 & H3) ---
 H2 (Poisson attack counts). Over a fixed duration, total attacks follow a Poisson distribution with mean λ × duration (consistent units). We compare observed counts to Poisson expectations (e.g., chi-square on interval counts with expected frequencies scaled to match observed totals).
@@ -56,7 +56,7 @@ COLUMN 3  (Methods top; Methods middle; Summary bottom)
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 --- Methods (top) — Simulation design ---
-Standard factorial for the main study: 5 × 4 × 3 × 4 = 240 conditions (p ∈ {0.30, 0.50, 0.70, 0.85, 0.95}; λ ∈ {0.2,0.5,1.0,2.0} min⁻¹; α ∈ {0.1,0.3,0.5}; packets per attack ∈ {10,25,50,100}). Thirty replications per condition → 7,200 runs in the primary results file. Random seeds: base_seed + run_id.
+Factorial for the main study: 5 × 4 × 3 × 4 = 240 conditions (p ∈ {0.30, 0.50, 0.70, 0.85, 0.95}; λ ∈ {0.2,0.5,1.0,2.0} min⁻¹; α ∈ {0.1,0.3,0.5}; packets per attack ∈ {10,25,50,100}). Thirty replications per condition → 7,200 runs in the primary results file. Random seeds: base_seed + run_id.
 
 --- Methods (middle) — Statistical analysis & quality checks ---
 H1: one-sample t-test vs theoretical P; exact binomial on pooled data when variance is zero. H2: chi-square. H3: K–S. H4: nonlinear fit. H5: grouped summaries and interaction visualization. Bonferroni α/5 across hypotheses; Cohen’s d for H1; 95% CIs on plots. Quality checks before long batches: detection sanity at high (p,n); expected attack count vs λ×duration; throughput between 0 and T₀; variability across replications; CSV columns and JSON fields valid.

@@ -17,7 +17,8 @@ Guide-aligned figures (written under analysis/figures/ when run_analysis runs):
   h5_interaction_plot.png    — H5: detection rate vs λ by p
   h1_forest_plot.png         — H1: observed rates vs theory with CIs
 
-Standard design: 5 p (0.30–0.95 for H1) x 4 lambda x 3 alpha x 4 n = 240 conditions x 30 reps = 7,200 runs (see GUIDE_FACTORIAL_DETECTION_PROBS).
+Standard design (guide): 5 p x 4 lambda x 3 alpha x 4 n = 240 conditions x 30 reps = 7,200 runs.
+H1 binomial values (simulation + theory): 0.30, 0.50, 0.70, 0.85, 0.95.
 """
 
 import itertools
@@ -27,6 +28,7 @@ import os
 import time
 from dataclasses import dataclass
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -37,27 +39,11 @@ from src.simulator import NetworkAttackSimulation
 
 plt.style.use("seaborn-v0_8-whitegrid")
 
-# Full H1 p table (kept here exactly as requested for reference/selection).
-GUIDE_FACTORIAL_DETECTION_PROBS_ALL = [
-    0.30,
-    0.35,
-    0.40,
-    0.45,
-    0.50,
-    0.55,
-    0.60,
-    0.65,
-    0.70,
-    0.75,
-    0.80,
-    0.85,
-    0.90,
-    0.95,
-]
-
-# Standard Phase 3 factorial: 5 p x 4 x 3 x 4 = 240 conditions (30 reps -> 7,200 runs).
-# Active p levels used for the 7,200-run design.
+# Hypothesis 1 (binomial): exactly five guide values (Standard 7,200 runs).
 GUIDE_FACTORIAL_DETECTION_PROBS = [0.30, 0.50, 0.70, 0.85, 0.95]
+
+# Use the same values for H1 theory table/overlay curves.
+GUIDE_FACTORIAL_DETECTION_PROBS_ALL = list(GUIDE_FACTORIAL_DETECTION_PROBS)
 
 
 @dataclass
@@ -111,7 +97,7 @@ def generate_synthetic_data(
     out_csv="synthetic_results.csv",
 ):
     if detection_probs is None:
-        detection_probs = [0.30, 0.60, 0.95]
+        detection_probs = [0.30, 0.70, 0.95]
     if attack_rates is None:
         attack_rates = [0.5, 1.0, 2.0]
     if decay_rates is None:
@@ -481,31 +467,54 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     h1_table = pd.DataFrame(results_h1)
     h1_table.to_csv(os.path.join(out_tables, "h1_results.csv"), index=False)
 
-    p_levels = sorted(df["p_detection"].unique())
     n_levels = sorted(df["n_packets_per_attack"].unique())
-    n_p = len(p_levels)
-    cmap = plt.cm.viridis
-    p_colors = {
-        p: cmap(i / max(n_p - 1, 1)) for i, p in enumerate(p_levels)
-    }
+    # H1 theory reference: same guide p values used in simulation.
+    theory_phase1_rows = []
+    for p_bin in GUIDE_FACTORIAL_DETECTION_PROBS_ALL:
+        for n_pkt in n_levels:
+            p_theory_ref = 1 - (1 - p_bin) ** int(n_pkt)
+            theory_phase1_rows.append(
+                {
+                    "p_detection": p_bin,
+                    "n_packets_per_attack": int(n_pkt),
+                    "theoretical_P_detect_ge_1": p_theory_ref,
+                }
+            )
+    pd.DataFrame(theory_phase1_rows).to_csv(
+        os.path.join(out_tables, "h1_binomial_theory_phase1.csv"), index=False
+    )
+    print(
+        f"Phase 1 binomial table ({len(GUIDE_FACTORIAL_DETECTION_PROBS_ALL)} p levels × {len(n_levels)} n): "
+        f"saved {os.path.join(out_tables, 'h1_binomial_theory_phase1.csv')}"
+    )
 
-    fig_w = 11 if n_p > 6 else 10
-    fig_h = 7.5 if n_p > 6 else 7
+    theory_p_all = GUIDE_FACTORIAL_DETECTION_PROBS_ALL
+    sim_p = sorted(df["p_detection"].unique())
+    set_sim = set(sim_p)
+    n_pt = len(theory_p_all)
+    cmap = plt.cm.viridis
+    p_colors = {p: cmap(i / max(n_pt - 1, 1)) for i, p in enumerate(theory_p_all)}
+
+    fig_w = 12
+    fig_h = 8
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     n_range = np.arange(1, 105)
 
-    for p in p_levels:
+    for p in theory_p_all:
         c = p_colors[p]
         theory_curve = 1 - (1 - p) ** n_range
+        is_sim = p in set_sim
         ax.plot(
             n_range,
             theory_curve,
             "-",
             color=c,
-            linewidth=2.0 if n_p <= 8 else 1.6,
-            alpha=0.95,
-            label=f"Theory p={p:.2f}",
+            linewidth=2.4 if is_sim else 1.0,
+            alpha=1.0 if is_sim else 0.42,
+            label=f"p={p:.2f}" + (" · sim" if is_sim else " · theory"),
         )
+    for p in sim_p:
+        c = p_colors[p]
         for n_pkt in n_levels:
             subset = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n_pkt)]
             if len(subset) == 0:
@@ -519,7 +528,7 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
                 yerr=yerr,
                 fmt="o",
                 color=c,
-                markersize=6 if n_p > 6 else 7,
+                markersize=7,
                 capsize=3,
                 capthick=1.5,
                 markeredgecolor="k",
@@ -530,17 +539,17 @@ def analyze_h1(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     ax.set_xlabel("Packets per Attack (n)", fontsize=13)
     ax.set_ylabel("P(Detect at Least 1 Packet)", fontsize=13)
     ax.set_title(
-        "Hypothesis 1: Binomial detection — theory vs simulation (p = 0.30–0.95, 240-condition factorial)",
-        fontsize=13,
+        "Hypothesis 1: Binomial — theory vs simulation (p = 0.30, 0.50, 0.70, 0.85, 0.95)",
+        fontsize=12,
         fontweight="bold",
     )
     leg = ax.legend(
-        fontsize=7 if n_p > 8 else 8,
-        ncol=2 if n_p > 6 else 1,
+        fontsize=6.5,
+        ncol=2,
         loc="center left",
         bbox_to_anchor=(1.02, 0.5),
         frameon=True,
-        title="Curves",
+        title="p (sim = Standard factorial)",
     )
     leg.get_title().set_fontsize(8)
     ax.set_ylim(-0.05, 1.05)
@@ -941,12 +950,34 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     pivot = df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
     # Use the same rounded values for both color and labels so they never disagree.
     pivot_display = pivot.round(3)
-    fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(12, 7), constrained_layout=True)
     abs_max = float(np.nanmax(np.abs(pivot_display.values)))
     all_zero_error = np.isclose(abs_max, 0.0, atol=1e-6)
     vmax = max(0.001, abs_max)
-    cmap = "Blues" if all_zero_error else "RdBu_r"
-    im = ax.imshow(pivot_display.values, cmap=cmap, aspect="auto", vmin=-vmax, vmax=vmax)
+    # Distinct diverging palette; near-zero still visible vs strong positive/negative.
+    cmap_name = "Blues" if all_zero_error else "Spectral_r"
+    if all_zero_error:
+        norm = None
+        im = ax.imshow(
+            pivot_display.values,
+            cmap=cmap_name,
+            aspect="auto",
+            vmin=0,
+            vmax=vmax,
+        )
+    else:
+        norm = mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
+        im = ax.imshow(
+            pivot_display.values,
+            cmap=cmap_name,
+            aspect="auto",
+            norm=norm,
+        )
+    n_rows, n_cols = pivot_display.shape
+    for r in range(n_rows + 1):
+        ax.axhline(r - 0.5, color="white", linewidth=2.0, zorder=10)
+    for c in range(n_cols + 1):
+        ax.axvline(c - 0.5, color="white", linewidth=2.0, zorder=10)
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels([f"{v:.1f}" for v in pivot.columns])
     ax.set_yticks(range(len(pivot.index)))
@@ -970,35 +1001,74 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
             fontsize=10,
             color="dimgray",
         )
+    # Text color from colormap so labels stay readable on varied cell colors.
+    cmap_obj = plt.get_cmap(cmap_name)
     for i in range(len(pivot.index)):
         for j in range(len(pivot.columns)):
             val = pivot_display.values[i, j]
-            color = "white" if abs(val) > 0.08 else "black"
-            ax.text(j, i, f"{val:+.3f}", ha="center", va="center", color=color, fontsize=10, fontweight="bold")
+            if all_zero_error:
+                t = (val - 0) / max(vmax, 1e-9)
+                txt_rgb = cmap_obj(np.clip(t, 0, 1))[:3]
+            else:
+                txt_rgb = cmap_obj(norm(val))[:3]
+            luminance = 0.299 * txt_rgb[0] + 0.587 * txt_rgb[1] + 0.114 * txt_rgb[2]
+            txt_color = "white" if luminance < 0.45 else "#1a1a1a"
+            ax.text(
+                j,
+                i,
+                f"{val:+.3f}",
+                ha="center",
+                va="center",
+                color=txt_color,
+                fontsize=10,
+                fontweight="bold",
+            )
     plt.colorbar(im, ax=ax, label="Prediction Error", shrink=0.8)
     plt.savefig(os.path.join(out_figs, "h5_error_heatmap.png"), dpi=300, bbox_inches="tight")
     if show_figures:
         plt.show()
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
-    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
-    for i, p in enumerate(sorted(df["p_detection"].unique())):
+    fig, ax = plt.subplots(figsize=(12, 7), constrained_layout=True)
+    p_levels = sorted(df["p_detection"].unique())
+    n_p = len(p_levels)
+    # Distinct colors (tab10 + tab20 tail if many p levels).
+    base_colors = list(plt.cm.tab10(np.linspace(0, 1, 10)))
+    if n_p > 10:
+        base_colors.extend(plt.cm.tab20(np.linspace(0, 1, 20)))
+    markers = ["o", "s", "^", "D", "v", "P", "X", "h", "p", "*", "8", "H", "+", "d"]
+    linestyles = ["-", "--", "-.", ":", (0, (5, 2)), (0, (3, 1, 1, 1)), (0, (5, 5)), (0, (1, 1))]
+    lam_sorted = sorted(df["lambda_attack_rate"].unique())
+    lam_arr = np.asarray(lam_sorted, dtype=float)
+    spread = float(lam_arr.max() - lam_arr.min()) if len(lam_arr) > 1 else 1.0
+    dodge = spread * 0.018 / max(n_p, 1)
+
+    for i, p in enumerate(p_levels):
         sub = df[df["p_detection"] == p]
         means = sub.groupby("lambda_attack_rate")["observed_detection_rate"].mean()
         stds = sub.groupby("lambda_attack_rate")["observed_detection_rate"].std()
-        n_rep = sub.groupby("lambda_attack_rate")["observed_detection_rate"].count().values
-        yerr = 1.96 * stds.values / np.sqrt(np.maximum(n_rep, 1))
+        n_rep = sub.groupby("lambda_attack_rate")["observed_detection_rate"].count()
+        x_base = np.asarray(means.index.tolist(), dtype=float)
+        x_plot = x_base + (i - (n_p - 1) / 2.0) * dodge
+        yerr = 1.96 * stds.reindex(means.index).values / np.sqrt(
+            np.maximum(n_rep.reindex(means.index).values, 1)
+        )
+        color = base_colors[i % len(base_colors)]
+        m = markers[i % len(markers)]
+        ls = linestyles[i % len(linestyles)]
         ax.errorbar(
-            means.index,
+            x_plot,
             means.values,
             yerr=yerr,
-            fmt="o-",
-            color=colors[i % len(colors)],
-            linewidth=2,
-            markersize=8,
+            fmt=m,
+            color=color,
+            linestyle=ls,
+            linewidth=2.2,
+            markersize=9,
             capsize=4,
-            label=f"p = {p:.2f}",
+            markeredgecolor="0.15",
+            markeredgewidth=0.8,
+            label=f"p = {p:.4f}",
         )
     ax.set_xlabel("Attack Rate (lambda)", fontsize=12)
     ax.set_ylabel("Mean Observed Detection Rate", fontsize=12)
