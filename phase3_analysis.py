@@ -942,9 +942,16 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     pivot = df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
     fig, ax = plt.subplots(figsize=(11, 6.5), constrained_layout=True)
     abs_max = float(np.nanmax(np.abs(pivot.values)))
-    all_zero_error = np.isclose(abs_max, 0.0)
-    vmax = max(0.05, abs_max)
-    cmap = "Greys" if all_zero_error else "RdBu_r"
+    # Only treat as "all zero" when numerically exact — np.isclose(abs_max,0) wrongly
+    # classifies tiny real errors as zero and forces Greys with no contrast.
+    all_zero_error = not np.isfinite(abs_max) or abs_max < 1e-15
+    # Data-driven scale: vmax=max(0.05, abs_max) maps tiny errors to ~white in RdBu_r.
+    if all_zero_error:
+        vmax = 1.0
+        cmap = "Greys"
+    else:
+        vmax = max(abs_max, 1e-15)
+        cmap = "RdBu_r"
     im = ax.imshow(pivot.values, cmap=cmap, aspect="auto", vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels([f"{v:.1f}" for v in pivot.columns])
@@ -972,8 +979,17 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     for i in range(len(pivot.index)):
         for j in range(len(pivot.columns)):
             val = pivot.values[i, j]
-            color = "white" if abs(val) > 0.08 else "black"
-            ax.text(j, i, f"{val:+.3f}", ha="center", va="center", color=color, fontsize=10, fontweight="bold")
+            if not all_zero_error:
+                color = "white" if abs(val) > 0.35 * vmax else "black"
+            else:
+                color = "black"
+            if np.isfinite(val) and 0 < abs(val) < 0.01:
+                txt = f"{val:+.4f}"
+            elif np.isfinite(val) and abs(val) < 1e-6 and val != 0.0:
+                txt = f"{val:+.1e}"
+            else:
+                txt = f"{val:+.3f}"
+            ax.text(j, i, txt, ha="center", va="center", color=color, fontsize=10, fontweight="bold")
     plt.colorbar(im, ax=ax, label="Prediction Error", shrink=0.8)
     plt.savefig(os.path.join(out_figs, "h5_error_heatmap.png"), dpi=300, bbox_inches="tight")
     if show_figures:
@@ -984,9 +1000,9 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
     for i, p in enumerate(sorted(df["p_detection"].unique())):
         sub = df[df["p_detection"] == p]
-        means = sub.groupby("lambda_attack_rate")["observed_detection_rate"].mean()
-        stds = sub.groupby("lambda_attack_rate")["observed_detection_rate"].std()
-        n_rep = sub.groupby("lambda_attack_rate")["observed_detection_rate"].count().values
+        means = sub.groupby("lambda_attack_rate")["detection_error"].mean()
+        stds = sub.groupby("lambda_attack_rate")["detection_error"].std().fillna(0.0)
+        n_rep = sub.groupby("lambda_attack_rate")["detection_error"].count().values
         yerr = 1.96 * stds.values / np.sqrt(np.maximum(n_rep, 1))
         ax.errorbar(
             means.index,
@@ -1000,16 +1016,22 @@ def analyze_h5(df: pd.DataFrame, out_tables: str, out_figs: str, show_figures: b
             label=f"p = {p:.2f}",
         )
     ax.set_xlabel("Attack Rate (lambda)", fontsize=12)
-    ax.set_ylabel("Mean Observed Detection Rate", fontsize=12)
-    ax.set_title("Interaction Plot: IDS Quality x Attack Rate", fontsize=13, fontweight="bold")
-    # When curves overlap at ~0/1 levels, tighten y-range for readability.
+    ax.set_ylabel("Mean prediction error (observed − theoretical rate)", fontsize=12)
+    ax.set_title(
+        "Interaction Plot: IDS Quality × Attack Rate\n"
+        "(deviation from binomial detection model)",
+        fontsize=13,
+        fontweight="bold",
+    )
+    ax.axhline(0.0, color="gray", linestyle="--", linewidth=1, alpha=0.7)
     y_all = []
     for p in sorted(df["p_detection"].unique()):
         sub = df[df["p_detection"] == p]
-        y_all.extend(sub.groupby("lambda_attack_rate")["observed_detection_rate"].mean().values.tolist())
-    if y_all and (max(y_all) - min(y_all) < 0.03):
-        center = float(np.mean(y_all))
-        ax.set_ylim(max(0.0, center - 0.03), min(1.0, center + 0.03))
+        y_all.extend(sub.groupby("lambda_attack_rate")["detection_error"].mean().values.tolist())
+    if y_all:
+        lo, hi = float(np.min(y_all)), float(np.max(y_all))
+        pad = max(0.02 * (hi - lo), 0.002) if hi > lo else 0.01
+        ax.set_ylim(lo - pad, hi + pad)
     ax.legend(title="IDS Quality", fontsize=10)
     ax.grid(True, alpha=0.3)
     plt.savefig(os.path.join(out_figs, "h5_interaction_plot.png"), dpi=300, bbox_inches="tight")
