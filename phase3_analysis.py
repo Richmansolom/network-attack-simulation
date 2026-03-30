@@ -70,7 +70,7 @@ class Phase3Config:
         if self.detection_probs is None:
             self.detection_probs = list(GUIDE_FACTORIAL_DETECTION_PROBS)
         if self.attack_rates is None:
-            self.attack_rates = [0.2, 0.5, 1.0, 2.0]
+            self.attack_rates = [0.2, 0.5, 1.0, 5.0]
         if self.decay_rates is None:
             self.decay_rates = [0.1, 0.3, 0.5]
         if self.packets_per_attack is None:

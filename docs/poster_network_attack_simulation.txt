@@ -56,7 +56,7 @@ COLUMN 3  (Methods top; Methods middle; Summary bottom)
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 --- Methods (top) — Simulation design ---
-Factorial for the main study: 5 × 4 × 3 × 4 = 240 conditions (p ∈ {0.30, 0.50, 0.70, 0.85, 0.95}; λ ∈ {0.2,0.5,1.0,2.0} min⁻¹; α ∈ {0.1,0.3,0.5}; packets per attack ∈ {10,25,50,100}). Thirty replications per condition → 7,200 runs in the primary results file. Random seeds: base_seed + run_id.
+Factorial for the main study: 5 × 4 × 3 × 4 = 240 conditions (p ∈ {0.30, 0.50, 0.70, 0.85, 0.95}; λ ∈ {0.2,0.5,1.0,5.0} min⁻¹; α ∈ {0.1,0.3,0.5}; packets per attack ∈ {10,25,50,100}). Thirty replications per condition → 7,200 runs in the primary results file. Random seeds: base_seed + run_id.
 
 --- Methods (middle) — Statistical analysis & quality checks ---
 H1: one-sample t-test vs theoretical P; exact binomial on pooled data when variance is zero. H2: chi-square. H3: K–S. H4: nonlinear fit. H5: grouped summaries and interaction visualization. Bonferroni α/5 across hypotheses; Cohen’s d for H1; 95% CIs on plots. Quality checks before long batches: detection sanity at high (p,n); expected attack count vs λ×duration; throughput between 0 and T₀; variability across replications; CSV columns and JSON fields valid.
