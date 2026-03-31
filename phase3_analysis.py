@@ -1,105 +1,141 @@
 """
-Phase 3 Analysis Pipeline (Fresh Build)
-======================================
+Phase 3 Analysis Script -- Network Attack Simulation Research
+=============================================================
 
-Guide-aligned default design:
-  5 p x 4 lambda x 3 alpha x 4 n = 240 conditions
-  240 x 30 replications = 7,200 runs
+Base analysis pipeline with poster-style figures integrated.
+Parameters below are the active project parameters.
 """
+
+# ============================================================================
+# CONFIGURATION -- MODIFY THIS BLOCK
+# ============================================================================
+
+# File paths
+RESULTS_FILE = "results/all_results.csv"
+OUTPUT_DIR = "analysis"
+FIGURES_DIR = f"{OUTPUT_DIR}/figures"
+TABLES_DIR = f"{OUTPUT_DIR}/tables"
+
+# Experiment parameters (keep as provided for this project)
+DETECTION_PROBS = [0.30, 0.50, 0.70, 0.85, 0.95]
+ATTACK_RATES = [0.2, 0.5, 1.0, 2.0, 5.0]
+DECAY_RATES = [0.1, 0.3, 0.5]
+PACKETS_PER_ATTACK = [1, 2, 3, 5, 10, 25, 50]
+N_REPLICATIONS = 30
+SIMULATION_DURATION_MIN = 10.0
+BASE_SEED = 42
+
+# Initial throughput
+T0 = 100.0
+
+# Statistical thresholds
+ALPHA = 0.05
+N_HYPOTHESES = 5
+ALPHA_CORRECTED = ALPHA / N_HYPOTHESES
+
+# Set True only for dry-run pipeline testing
+USE_SYNTHETIC_DATA = False
+
+
+# ============================================================================
+# IMPORTS
+# ============================================================================
 
 import itertools
 import json
 import os
-import time
-from dataclasses import dataclass
+import sys
+import warnings
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from scipy import stats
 from scipy.optimize import curve_fit
 
-from src.simulator import NetworkAttackSimulation
+warnings.filterwarnings("ignore")
+np.random.seed(BASE_SEED)
+
+# CLI flags for PowerShell usage:
+#   --generate-only       -> generate synthetic data and exit
+#   --use-synthetic       -> run full pipeline using synthetic data
+#   --results-file <path> -> override input/output CSV path
+GENERATE_ONLY = "--generate-only" in sys.argv
+if "--use-synthetic" in sys.argv or GENERATE_ONLY:
+    USE_SYNTHETIC_DATA = True
+if "--results-file" in sys.argv:
+    idx = sys.argv.index("--results-file")
+    if idx + 1 < len(sys.argv):
+        RESULTS_FILE = sys.argv[idx + 1]
+
+sns.set_style("whitegrid")
+plt.rcParams["figure.dpi"] = 150
+plt.rcParams["savefig.dpi"] = 300
+plt.rcParams["font.size"] = 13
+plt.rcParams["axes.titlesize"] = 15
+plt.rcParams["axes.labelsize"] = 13
+
+os.makedirs(FIGURES_DIR, exist_ok=True)
+os.makedirs(TABLES_DIR, exist_ok=True)
+
+print("=" * 70)
+print("PHASE 3 STATISTICAL ANALYSIS")
+print("Network Attack Simulation Research")
+print("=" * 70)
 
 
-plt.style.use("seaborn-v0_8-whitegrid")
+# ============================================================================
+# SECTION 0: SYNTHETIC DATA GENERATOR
+# ============================================================================
 
-
-@dataclass
-class Phase3Config:
-    # Guide defaults
-    detection_probs: list = None  # [0.70, 0.80, 0.85, 0.90, 0.95]
-    attack_rates: list = None  # [0.2, 0.5, 1.0, 2.0]
-    decay_rates: list = None  # [0.1, 0.3, 0.5]
-    packets_per_attack: list = None  # [10, 25, 50, 100]
-    n_replications: int = 30
-    simulation_duration_min: float = 10.0
-    base_seed: int = 42
-
-    # IO
-    experiment_plan_csv: str = "experiment_plan.csv"
-    results_dir: str = "results"
-    analysis_dir: str = "analysis"
-
-    # Execution switches
-    run_synthetic: bool = False
-    run_experiments: bool = True
-    run_analysis: bool = True
-    show_figures: bool = True
-
-    def __post_init__(self):
-        if self.detection_probs is None:
-            self.detection_probs = [0.70, 0.80, 0.85, 0.90, 0.95]
-        if self.attack_rates is None:
-            self.attack_rates = [0.2, 0.5, 1.0, 2.0]
-        if self.decay_rates is None:
-            self.decay_rates = [0.1, 0.3, 0.5]
-        if self.packets_per_attack is None:
-            self.packets_per_attack = [10, 25, 50, 100]
-
-
-def ensure_dirs(cfg: Phase3Config):
-    os.makedirs(cfg.results_dir, exist_ok=True)
-    os.makedirs(os.path.join(cfg.analysis_dir, "tables"), exist_ok=True)
-    os.makedirs(os.path.join(cfg.analysis_dir, "figures"), exist_ok=True)
-
-
-def generate_synthetic_data(cfg: Phase3Config, out_csv: str):
-    rng = np.random.default_rng(cfg.base_seed)
+def generate_synthetic_data(
+    detection_probs=DETECTION_PROBS,
+    attack_rates=ATTACK_RATES,
+    decay_rates=DECAY_RATES,
+    packets_list=PACKETS_PER_ATTACK,
+    n_reps=N_REPLICATIONS,
+    duration=SIMULATION_DURATION_MIN,
+    t0_val=T0,
+    base_seed=BASE_SEED,
+    out_csv=RESULTS_FILE,
+):
+    rng = np.random.default_rng(base_seed)
     rows = []
     run_id = 0
-    conditions = list(
-        itertools.product(
-            cfg.detection_probs,
-            cfg.attack_rates,
-            cfg.decay_rates,
-            cfg.packets_per_attack,
-        )
-    )
+
+    conditions = list(itertools.product(detection_probs, attack_rates, decay_rates, packets_list))
+
     for cond_id, (p, lam, alpha, n_pkt) in enumerate(conditions):
-        for rep in range(cfg.n_replications):
-            seed = cfg.base_seed + run_id
-            r = np.random.default_rng(seed)
+        for rep in range(n_reps):
+            seed = base_seed + run_id
+            rng_run = np.random.default_rng(seed)
 
-            total_attacks = max(1, int(r.poisson(lam * cfg.simulation_duration_min)))
-            total_detected = 0
-            total_pkt_detected = 0
-            for _ in range(total_attacks):
-                pkt_detected = int(r.binomial(n_pkt, p))
-                total_pkt_detected += pkt_detected
-                if pkt_detected >= 1:
-                    total_detected += 1
+            expected_attacks = max(1, int(rng_run.poisson(lam * duration)))
+            detections = 0
+            total_packets_detected = 0
+            for _ in range(expected_attacks):
+                pkts = rng_run.binomial(n_pkt, p)
+                total_packets_detected += pkts
+                if pkts >= 1:
+                    detections += 1
 
-            obs_det = total_detected / total_attacks
-            obs_pkt = total_pkt_detected / max(total_attacks * n_pkt, 1)
+            obs_det_rate = detections / expected_attacks
+            obs_pkt_det = total_packets_detected / (expected_attacks * n_pkt)
 
-            counts_per_min = [int(r.poisson(lam)) for _ in range(int(cfg.simulation_duration_min))]
-            n_arrivals = max(1, sum(counts_per_min))
-            inter_arrivals = r.exponential(1.0 / lam, size=max(n_arrivals - 1, 1)).tolist()
+            counts_per_min = [int(rng_run.poisson(lam)) for _ in range(int(duration))]
 
-            t = np.linspace(0, cfg.simulation_duration_min, 20)
-            throughput = 100.0 * np.exp(-alpha * t) + r.normal(0, 1.2, size=len(t))
-            throughput = np.clip(throughput, 0, 100.0)
+            if expected_attacks > 1:
+                inter_arrivals = rng_run.exponential(1.0 / lam, size=expected_attacks - 1).tolist()
+            else:
+                inter_arrivals = [float(rng_run.exponential(1.0 / lam))]
+
+            times = np.linspace(0, duration, 20)
+            throughput = t0_val * np.exp(-alpha * times)
+            throughput += rng_run.normal(0, 1.5, size=len(times))
+            throughput = np.clip(throughput, 0, t0_val)
 
             rows.append(
                 {
@@ -110,424 +146,627 @@ def generate_synthetic_data(cfg: Phase3Config, out_csv: str):
                     "lambda_attack_rate": lam,
                     "alpha_decay_rate": alpha,
                     "n_packets_per_attack": n_pkt,
-                    "sim_duration_min": cfg.simulation_duration_min,
+                    "sim_duration_min": duration,
                     "random_seed": seed,
-                    "observed_detection_rate": float(obs_det),
-                    "observed_packet_detection_rate": float(obs_pkt),
-                    "total_attacks": int(total_attacks),
-                    "total_detected": int(total_detected),
+                    "observed_detection_rate": obs_det_rate,
+                    "observed_packet_detection_rate": float(np.clip(obs_pkt_det, 0, 1)),
+                    "total_attacks": expected_attacks,
+                    "total_detected": detections,
                     "mean_inter_arrival_time": float(np.mean(inter_arrivals)),
                     "attack_counts_per_interval": json.dumps(counts_per_min),
-                    "inter_arrival_times": json.dumps([round(x, 6) for x in inter_arrivals]),
+                    "inter_arrival_times": json.dumps([round(x, 4) for x in inter_arrivals]),
                     "final_throughput": float(throughput[-1]),
                     "throughput_timeseries": json.dumps(
-                        [[round(tt, 4), round(v, 6)] for tt, v in zip(t, throughput)]
+                        [[round(t, 2), round(v, 2)] for t, v in zip(times.tolist(), throughput.tolist())]
                     ),
                     "mean_throughput": float(np.mean(throughput)),
-                    "initial_throughput": 100.0,
+                    "initial_throughput": t0_val,
                 }
             )
             run_id += 1
 
-    df = pd.DataFrame(rows)
-    df.to_csv(out_csv, index=False)
-    print(f"Synthetic results written: {out_csv} ({len(df)} rows)")
-    return df
+    df_out = pd.DataFrame(rows)
+    out_dir = os.path.dirname(out_csv) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    df_out.to_csv(out_csv, index=False)
+    print(f"Generated {len(df_out)} synthetic runs across {len(conditions)} conditions")
+    print(f"Synthetic file written: {out_csv}")
+    return df_out
 
 
-def build_experiment_plan(cfg: Phase3Config):
-    conditions = list(
-        itertools.product(cfg.detection_probs, cfg.attack_rates, cfg.decay_rates, cfg.packets_per_attack)
-    )
-    rows = []
-    run_id = 0
-    for cond_id, (p, lam, alpha, n_pkt) in enumerate(conditions):
-        for rep in range(cfg.n_replications):
-            rows.append(
-                {
-                    "run_id": run_id,
-                    "condition_id": cond_id,
-                    "replication": rep,
-                    "p_detection": p,
-                    "lambda_attack_rate": lam,
-                    "alpha_decay_rate": alpha,
-                    "n_packets_per_attack": n_pkt,
-                    "sim_duration_min": cfg.simulation_duration_min,
-                    "random_seed": cfg.base_seed + run_id,
-                }
-            )
-            run_id += 1
-    plan = pd.DataFrame(rows)
-    plan.to_csv(cfg.experiment_plan_csv, index=False)
-    print(f"Conditions: {len(conditions)}")
-    print(f"Replications: {cfg.n_replications}")
-    print(f"Total runs: {len(plan)}")
-    print(f"Plan saved: {cfg.experiment_plan_csv}")
-    return plan
+# ============================================================================
+# SECTION 1: LOAD AND VALIDATE DATA
+# ============================================================================
+
+print("\n" + "=" * 70)
+print("SECTION 1: DATA LOADING AND VALIDATION")
+print("=" * 70)
+
+if USE_SYNTHETIC_DATA:
+    print("Using SYNTHETIC data (pipeline test)")
+    df = generate_synthetic_data(out_csv=RESULTS_FILE)
+else:
+    print(f"Loading: {RESULTS_FILE}")
+    df = pd.read_csv(RESULTS_FILE)
+
+if GENERATE_ONLY:
+    print("\nGeneration-only mode complete. Exiting before analysis sections.")
+    raise SystemExit(0)
+
+print(f"Total rows: {len(df)}")
+print(f"Unique conditions: {df['condition_id'].nunique()}")
+reps_per = df.groupby("condition_id").size()
+print(f"Replications per condition: min={reps_per.min()}, max={reps_per.max()}, median={reps_per.median():.0f}")
+
+missing = df.isnull().sum()
+if missing.sum() > 0:
+    print("\nWARNING: Missing values detected:")
+    print(missing[missing > 0])
+else:
+    print("No missing values detected.")
+
+print("\nSanity checks:")
+print(f"  Detection rate range: [{df['observed_detection_rate'].min():.3f}, {df['observed_detection_rate'].max():.3f}]")
+print(f"  Attack count range: [{df['total_attacks'].min()}, {df['total_attacks'].max()}]")
+print(f"  Final throughput range: [{df['final_throughput'].min():.1f}, {df['final_throughput'].max():.1f}]")
 
 
-class ExperimentRunner:
-    def __init__(self, plan_csv: str, output_dir: str):
-        self.plan = pd.read_csv(plan_csv)
-        self.results_file = os.path.join(output_dir, "all_results.csv")
-        os.makedirs(output_dir, exist_ok=True)
-        if os.path.exists(self.results_file):
-            existing = pd.read_csv(self.results_file)
-            self.completed = set(existing["run_id"].tolist())
-        else:
-            self.completed = set()
+# ============================================================================
+# SECTION 3: HYPOTHESIS 1 -- BINOMIAL DETECTION
+# ============================================================================
 
-    def run_single(self, row: pd.Series):
-        cfg = {
-            "ids": {"detection_prob": float(row["p_detection"])},
-            "attacks": {
-                "rate": float(row["lambda_attack_rate"]),
-                "packets_per_attack": int(row["n_packets_per_attack"]),
-            },
-            "network": {
-                "bandwidth": 100,
-                "buffer_size": 1000,
-                "latency": 10,
-                "degradation_alpha": float(row["alpha_decay_rate"]),
-            },
-            "simulation": {
-                "duration_minutes": float(row["sim_duration_min"]),
-                "sampling_interval": 1.0,
-            },
-        }
-        sim = NetworkAttackSimulation(cfg)
-        sim.run(duration_minutes=float(row["sim_duration_min"]), seed=int(row["random_seed"]))
-        summary = sim.get_run_summary()
-        summary["attack_counts_per_interval"] = json.dumps(summary["attack_counts_per_interval"])
-        summary["inter_arrival_times"] = json.dumps(summary["inter_arrival_times"])
-        summary["throughput_timeseries"] = json.dumps(summary["throughput_timeseries"])
-        return summary
+print("\n" + "=" * 70)
+print("SECTION 3: HYPOTHESIS 1 -- BINOMIAL DETECTION MODEL")
+print("H0: Simulated detection rate = 1 - (1-p)^n")
+print("=" * 70)
 
-    def run_all(self, save_every: int = 50):
-        remain = self.plan[~self.plan["run_id"].isin(self.completed)]
-        print(f"Running {len(remain)} experiments ({len(self.completed)} already completed)")
-        new_rows = []
-        t0 = time.time()
-        for i, (_, row) in enumerate(remain.iterrows(), start=1):
-            result = self.run_single(row)
-            new_rows.append({**row.to_dict(), **result})
-            if i % save_every == 0:
-                self._save(new_rows)
-                new_rows = []
-                elapsed = time.time() - t0
-                rate = i / max(elapsed, 1e-9)
-                print(f"Run {i}/{len(remain)} | {rate:.2f} runs/sec")
-        if new_rows:
-            self._save(new_rows)
-
-    def _save(self, rows):
-        new_df = pd.DataFrame(rows)
-        if os.path.exists(self.results_file):
-            old = pd.read_csv(self.results_file)
-            out = pd.concat([old, new_df], ignore_index=True)
-        else:
-            out = new_df
-        out.to_csv(self.results_file, index=False)
-
-
-def _json_list(cell):
-    try:
-        return json.loads(cell) if isinstance(cell, str) else []
-    except Exception:
-        return []
-
-
-def analyze_h1(df, out_tables, out_figs, show):
-    rows = []
-    for p in sorted(df["p_detection"].unique()):
-        for n in sorted(df["n_packets_per_attack"].unique()):
-            sub = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
-            if len(sub) == 0:
-                continue
-            theory = 1 - (1 - p) ** n
-            obs = sub["observed_detection_rate"].values
-            t_stat, p_val = stats.ttest_1samp(obs, theory)
-            rows.append({"p": p, "n": n, "theoretical": theory, "observed_mean": float(np.mean(obs)), "p_value": float(p_val)})
-    out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(out_tables, "h1_results.csv"), index=False)
-
-    fig, ax = plt.subplots(figsize=(10, 7))
-    n_range = np.arange(1, int(df["n_packets_per_attack"].max()) + 5)
-    for p in sorted(df["p_detection"].unique()):
-        theory_curve = 1 - (1 - p) ** n_range
-        ax.plot(n_range, theory_curve, linewidth=2, label=f"Theory p={p:.2f}")
-        for n in sorted(df["n_packets_per_attack"].unique()):
-            sub = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
-            m = sub["observed_detection_rate"].mean()
-            se = sub["observed_detection_rate"].std(ddof=1) / np.sqrt(max(len(sub), 1))
-            ax.errorbar(n, m, yerr=1.96 * se, fmt="o", color=ax.lines[-1].get_color(), capsize=3)
-    ax.set_title("Hypothesis 1: Theoretical vs. Simulated Detection Probability", fontweight="bold")
-    ax.set_xlabel("Packets per Attack (n)")
-    ax.set_ylabel("P(Detect at Least 1 Packet)")
-    ax.set_ylim(-0.05, 1.05)
-    ax.legend(loc="lower right")
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_figs, "h1_detection_overlay.png"), dpi=300, bbox_inches="tight")
-    if show:
-        plt.show()
-    plt.close(fig)
-
-
-def analyze_h2(df, out_tables, out_figs, show):
-    rows = []
-    lambdas = sorted(df["lambda_attack_rate"].unique())
-    fig, axes = plt.subplots(1, len(lambdas), figsize=(5 * len(lambdas), 5), squeeze=False)
-    axes = axes[0]
-    for ax, lam in zip(axes, lambdas):
-        sub = df[df["lambda_attack_rate"] == lam]
-        duration = float(sub["sim_duration_min"].iloc[0])
-        mu = lam * duration
-        counts = sub["total_attacks"].values
-        max_k = int(max(np.max(counts), mu + 4 * np.sqrt(mu)))
-        bins = np.arange(-0.5, max_k + 1.5)
-        ax.hist(counts, bins=bins, density=True, alpha=0.7, edgecolor="black", label="Simulated")
-        k = np.arange(0, max_k + 1)
-        pmf = stats.poisson.pmf(k, mu)
-        ax.plot(k, pmf, "ro-", linewidth=2, markersize=5, label=f"Poisson({mu:.0f})")
-        ax.set_title(f"lambda = {lam}", fontweight="bold")
-        ax.set_xlabel("Number of attacks")
-        ax.set_ylabel("Probability")
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=9)
-
-        obs_freq, _ = np.histogram(counts, bins=np.arange(0, max_k + 2))
-        exp_freq = np.array([stats.poisson.pmf(i, mu) * len(counts) for i in range(len(obs_freq))])
-        if exp_freq.sum() > 0:
-            exp_freq = exp_freq * (obs_freq.sum() / exp_freq.sum())
-        try:
-            chi2, p_val = stats.chisquare(obs_freq, exp_freq)
-        except Exception:
-            chi2, p_val = np.nan, np.nan
-        rows.append({"lambda": lam, "expected_mean": mu, "observed_mean": float(np.mean(counts)), "chi2": chi2, "p_value": p_val})
-    out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(out_tables, "h2_results.csv"), index=False)
-    plt.suptitle("Hypothesis 2: Observed vs. Poisson Attack Counts", fontsize=14, fontweight="bold", y=1.02)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_figs, "h2_poisson_overlay.png"), dpi=300, bbox_inches="tight")
-    if show:
-        plt.show()
-    plt.close(fig)
-
-
-def analyze_h3(df, out_tables, out_figs, show):
-    rows = []
-    lambdas = sorted(df["lambda_attack_rate"].unique())
-    fig, axes = plt.subplots(2, len(lambdas), figsize=(5 * len(lambdas), 9), squeeze=False)
-    for col, lam in enumerate(lambdas):
-        sub = df[df["lambda_attack_rate"] == lam]
-        all_ia = []
-        for v in sub["inter_arrival_times"].tolist():
-            all_ia.extend(_json_list(v))
-        ia = np.array(all_ia, dtype=float)
-        if len(ia) < 10:
+results_h1 = []
+for p in sorted(df["p_detection"].unique()):
+    for n in sorted(df["n_packets_per_attack"].unique()):
+        subset = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
+        if len(subset) == 0:
             continue
-        ks_stat, p_val = stats.kstest(ia, "expon", args=(0, 1.0 / lam))
-        rows.append(
+
+        p_theory = 1 - (1 - p) ** n
+        observed = subset["observed_detection_rate"].values
+        obs_mean = np.mean(observed)
+        obs_std = np.std(observed, ddof=1)
+
+        t_stat, p_val = stats.ttest_1samp(observed, p_theory)
+        se = obs_std / np.sqrt(len(observed))
+        ci_lower = obs_mean - 1.96 * se
+        ci_upper = obs_mean + 1.96 * se
+        theory_in_ci = ci_lower <= p_theory <= ci_upper
+        d = (obs_mean - p_theory) / obs_std if obs_std > 0 else 0
+
+        results_h1.append(
             {
-                "lambda": lam,
-                "theoretical_mean": 1.0 / lam,
-                "observed_mean": float(np.mean(ia)),
-                "ks_statistic": float(ks_stat),
-                "p_value": float(p_val),
-                "n_samples": int(len(ia)),
+                "p": p,
+                "n": n,
+                "theoretical": round(p_theory, 4),
+                "observed_mean": round(obs_mean, 4),
+                "observed_std": round(obs_std, 4),
+                "difference": round(obs_mean - p_theory, 4),
+                "ci_lower": round(ci_lower, 4),
+                "ci_upper": round(ci_upper, 4),
+                "theory_in_ci": theory_in_ci,
+                "t_statistic": round(t_stat, 4),
+                "p_value": round(p_val, 4),
+                "cohens_d": round(d, 3),
+                "significant": p_val < ALPHA_CORRECTED,
             }
         )
-        ax_h = axes[0, col]
-        ax_h.hist(ia, bins=40, density=True, alpha=0.7, edgecolor="black", color="steelblue")
-        t_range = np.linspace(0, np.percentile(ia, 99), 200)
-        ax_h.plot(t_range, lam * np.exp(-lam * t_range), "r-", linewidth=2.2, label=f"Exp(lambda={lam})")
-        ax_h.set_title(f"lambda = {lam}", fontweight="bold")
-        ax_h.set_xlabel("Inter-arrival time (min)")
-        ax_h.set_ylabel("Density")
-        ax_h.legend(fontsize=9)
-        ax_h.grid(True, alpha=0.3)
 
-        ax_q = axes[1, col]
-        probs = np.linspace(0.01, 0.99, min(len(ia), 200))
-        theo_q = stats.expon.ppf(probs, scale=1.0 / lam)
-        samp_q = np.quantile(ia, probs)
-        ax_q.scatter(theo_q, samp_q, alpha=0.5, s=10)
-        m = max(theo_q.max(), samp_q.max())
-        ax_q.plot([0, m], [0, m], "r--", linewidth=2, label="Perfect fit")
-        ax_q.set_title(f"Q-Q Plot: lambda={lam}", fontweight="bold")
-        ax_q.set_xlabel("Theoretical quantiles")
-        ax_q.set_ylabel("Sample quantiles")
-        ax_q.legend(fontsize=9)
-        ax_q.grid(True, alpha=0.3)
-    out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(out_tables, "h3_results.csv"), index=False)
-    plt.suptitle("Hypothesis 3: Exponential Inter-Arrival Analysis", fontsize=14, fontweight="bold", y=1.02)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_figs, "h3_exponential_analysis.png"), dpi=300, bbox_inches="tight")
-    if show:
-        plt.show()
-    plt.close(fig)
+        status = "MATCH" if p_val > ALPHA_CORRECTED else "DIFFERS*"
+        print(f"  p={p:.2f}, n={n:3d}: theory={p_theory:.4f}, obs={obs_mean:.4f}, p-val={p_val:.4f}, d={d:+.3f} [{status}]")
 
+h1_table = pd.DataFrame(results_h1)
+h1_table.to_csv(f"{TABLES_DIR}/h1_results.csv", index=False)
 
-def _decay(t, t0, alpha):
-    return t0 * np.exp(-alpha * t)
+# Poster-style Figure 1
+fig, ax = plt.subplots(figsize=(10, 7))
+n_range = np.arange(1, max(PACKETS_PER_ATTACK) + 5)
+colors = ["#e41a1c", "#ff7f00", "#4daf4a", "#377eb8", "#984ea3"]
 
-
-def analyze_h4(df, out_tables, out_figs, show):
-    rows = []
-    alphas = sorted(df["alpha_decay_rate"].unique())
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-    ax1, ax2 = axes
-    colors = ["#377eb8", "#ff7f00", "#e41a1c"]
-    for i, alpha in enumerate(alphas):
-        sub = df[df["alpha_decay_rate"] == alpha]
-        fitted = []
-        r2s = []
-        for _, row in sub.iterrows():
-            ts = _json_list(row["throughput_timeseries"])
-            if len(ts) < 5:
-                continue
-            t = np.array([p[0] for p in ts], dtype=float)
-            y = np.array([p[1] for p in ts], dtype=float)
-            try:
-                popt, _ = curve_fit(_decay, t, y, p0=[100.0, alpha], bounds=([0, 0], [200, 10]), maxfev=4000)
-                yhat = _decay(t, *popt)
-                ss_res = np.sum((y - yhat) ** 2)
-                ss_tot = np.sum((y - np.mean(y)) ** 2)
-                r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
-                fitted.append(float(popt[1]))
-                r2s.append(float(r2))
-            except Exception:
-                continue
-        if len(fitted) == 0:
+for i, p in enumerate(sorted(df["p_detection"].unique())):
+    theory_curve = 1 - (1 - p) ** n_range
+    ax.plot(n_range, theory_curve, "-", color=colors[i % len(colors)], linewidth=2.5, label=f"Theory p={p:.2f}", zorder=2)
+    for n in sorted(df["n_packets_per_attack"].unique()):
+        sub = df[(df["p_detection"] == p) & (df["n_packets_per_attack"] == n)]
+        if len(sub) == 0:
             continue
-        mf = float(np.mean(fitted))
-        sf = float(np.std(fitted, ddof=1)) if len(fitted) > 1 else 0.0
-        rows.append({"alpha_theoretical": alpha, "alpha_fitted_mean": mf, "alpha_fitted_std": sf, "mean_r_squared": float(np.mean(r2s))})
+        m = sub["observed_detection_rate"].mean()
+        se = sub["observed_detection_rate"].std() / np.sqrt(len(sub))
+        ax.errorbar(
+            n,
+            m,
+            yerr=1.96 * se,
+            fmt="o",
+            color=colors[i % len(colors)],
+            markersize=7,
+            capsize=3,
+            capthick=1.5,
+            markeredgecolor="black",
+            markeredgewidth=0.5,
+            zorder=3,
+        )
 
-        # Plot a few simulated curves
-        for _, row in sub.head(4).iterrows():
-            ts = _json_list(row["throughput_timeseries"])
-            if len(ts) > 1:
-                t = [p[0] for p in ts]
-                y = [p[1] for p in ts]
-                ax1.plot(t, y, "-", color=colors[i % len(colors)], alpha=0.22, linewidth=0.9)
-        t_th = np.linspace(0, 10, 120)
-        ax1.plot(t_th, 100.0 * np.exp(-alpha * t_th), "--", color=colors[i % len(colors)], linewidth=2.2, label=f"Theory α={alpha}")
-
-    out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(out_tables, "h4_results.csv"), index=False)
-    ax1.set_title("Throughput Degradation Under Attack", fontweight="bold")
-    ax1.set_xlabel("Time (minutes)")
-    ax1.set_ylabel("Throughput (Mbps)")
-    ax1.grid(True, alpha=0.3)
-    ax1.legend(fontsize=9)
-
-    if len(out) > 0:
-        ax2.errorbar(out["alpha_theoretical"], out["alpha_fitted_mean"], yerr=out["alpha_fitted_std"], fmt="o", color="steelblue", capsize=5)
-        m = max(float(out["alpha_theoretical"].max()), float(out["alpha_fitted_mean"].max())) * 1.1
-        ax2.plot([0, m], [0, m], "r--", linewidth=2, label="Perfect agreement")
-        ax2.legend(fontsize=9)
-    ax2.set_title("Fitted vs. Theoretical Decay Rate", fontweight="bold")
-    ax2.set_xlabel("Theoretical α")
-    ax2.set_ylabel("Fitted α")
-    ax2.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_figs, "h4_degradation_analysis.png"), dpi=300, bbox_inches="tight")
-    if show:
-        plt.show()
-    plt.close(fig)
+ax.set_xlabel("Packets per Attack (n)", fontsize=14)
+ax.set_ylabel("P(Detect >= 1 Packet)", fontsize=14)
+ax.set_title("Theoretical vs. Simulated Detection Probability", fontsize=16, fontweight="bold")
+ax.legend(fontsize=11, loc="lower right")
+ax.set_ylim(-0.05, 1.05)
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig(f"{FIGURES_DIR}/h1_detection_overlay.png", dpi=300, bbox_inches="tight")
+plt.close()
+print(f"\nFigure saved: {FIGURES_DIR}/h1_detection_overlay.png")
 
 
-def analyze_h5(df, out_tables, out_figs, show):
-    d = df.copy()
-    d["theoretical_detection"] = 1 - (1 - d["p_detection"]) ** d["n_packets_per_attack"]
-    d["detection_error"] = d["observed_detection_rate"] - d["theoretical_detection"]
-    interaction = d.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].agg(["mean", "std"]).round(4)
-    interaction.to_csv(os.path.join(out_tables, "h5_interaction_table.csv"))
-    print("\nMean detection error by attack rate and IDS quality:")
-    print(interaction.to_string())
+# ============================================================================
+# SECTION 4: HYPOTHESIS 2 -- POISSON ATTACK COUNTS
+# ============================================================================
 
-    pivot = d.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
-    fig, ax = plt.subplots(figsize=(10, 6))
-    im = ax.imshow(pivot.values, cmap="RdBu_r", aspect="auto", vmin=-0.12, vmax=0.12)
-    ax.set_xticks(range(len(pivot.columns)))
-    ax.set_xticklabels([f"{x:.1f}" for x in pivot.columns])
-    ax.set_yticks(range(len(pivot.index)))
-    ax.set_yticklabels([f"{p:.2f}" for p in pivot.index])
-    ax.set_xlabel("Attack Rate λ (attacks/min)")
-    ax.set_ylabel("Detection Probability p")
-    ax.set_title("Where Models Break Down\nPrediction Error (Observed - Theoretical)", fontweight="bold")
-    for i in range(len(pivot.index)):
-        for j in range(len(pivot.columns)):
-            val = float(pivot.values[i, j])
-            txt = "white" if abs(val) > 0.07 else "black"
-            ax.text(j, i, f"{val:+.3f}", ha="center", va="center", color=txt, fontsize=10, fontweight="bold")
-    plt.colorbar(im, ax=ax, label="Prediction Error", shrink=0.8)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_figs, "h5_error_heatmap.png"), dpi=300, bbox_inches="tight")
-    if show:
-        plt.show()
-    plt.close(fig)
+print("\n" + "=" * 70)
+print("SECTION 4: HYPOTHESIS 2 -- POISSON ATTACK COUNTS")
+print("H0: Attack counts ~ Poisson(lambda * t)")
+print("=" * 70)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    n_focus = 10
-    if n_focus not in set(d["n_packets_per_attack"].unique().tolist()):
-        n_focus = int(sorted(d["n_packets_per_attack"].unique())[0])
-    p_d = d[d["n_packets_per_attack"] == n_focus]
-    colors = ["#e41a1c", "#ff7f00", "#4daf4a", "#377eb8", "#984ea3"]
-    for i, p in enumerate(sorted(p_d["p_detection"].unique())):
-        sub = p_d[p_d["p_detection"] == p]
-        means = sub.groupby("lambda_attack_rate")["observed_detection_rate"].mean()
-        stds = sub.groupby("lambda_attack_rate")["observed_detection_rate"].std()
-        ncount = sub.groupby("lambda_attack_rate")["observed_detection_rate"].count()
-        yerr = 1.96 * stds.values / np.sqrt(np.maximum(ncount.values, 1))
-        ax.errorbar(means.index, means.values, yerr=yerr, fmt="o-", color=colors[i % len(colors)], linewidth=2, markersize=7, capsize=4, label=f"p = {p:.2f}")
-    ax.set_xlabel("Attack Rate λ (attacks/min)")
-    ax.set_ylabel(f"Mean Detection Rate (n={n_focus})")
-    ax.set_title("Interaction: IDS Quality × Attack Rate", fontweight="bold")
-    ax.set_ylim(0.55, 1.05)
-    ax.set_yticks([0.6, 0.7, 0.8, 0.9, 1.0])
-    ax.legend(title="IDS Quality (p)")
+results_h2 = []
+n_lambdas = len(df["lambda_attack_rate"].unique())
+fig, axes = plt.subplots(1, n_lambdas, figsize=(4.5 * n_lambdas, 5), squeeze=False)
+axes = axes[0]
+
+for ax, lam in zip(axes, sorted(df["lambda_attack_rate"].unique())):
+    subset = df[df["lambda_attack_rate"] == lam]
+    duration = subset["sim_duration_min"].iloc[0]
+    expected_mean = lam * duration
+    counts = subset["total_attacks"].values
+
+    max_k = int(max(counts.max(), expected_mean + 4 * np.sqrt(expected_mean)))
+    bins = np.arange(-0.5, max_k + 1.5)
+    ax.hist(counts, bins=bins, density=True, alpha=0.7, edgecolor="black", color="steelblue", label="Simulated")
+    k_vals = np.arange(0, max_k + 1)
+    ax.plot(k_vals, stats.poisson.pmf(k_vals, expected_mean), "ro-", markersize=5, linewidth=2, label=f"Poisson({expected_mean:.0f})")
+    ax.set_xlabel("Number of Attacks")
+    ax.set_ylabel("Probability")
+    ax.set_title(f"lambda = {lam}", fontweight="bold")
+    ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_figs, "h5_interaction_plot.png"), dpi=300, bbox_inches="tight")
-    if show:
-        plt.show()
-    plt.close(fig)
+
+    obs_freq, _ = np.histogram(counts, bins=np.arange(0, max_k + 2))
+    exp_freq = np.array([stats.poisson.pmf(k, expected_mean) * len(counts) for k in range(len(obs_freq))])
+    if exp_freq.sum() > 0:
+        exp_freq = exp_freq * obs_freq.sum() / exp_freq.sum()
+
+    obs_c, exp_c, oa, ea = [], [], 0, 0
+    for o, e in zip(obs_freq, exp_freq):
+        oa += o
+        ea += e
+        if ea >= 5:
+            obs_c.append(oa)
+            exp_c.append(ea)
+            oa = 0
+            ea = 0
+    if oa > 0 or ea > 0:
+        if obs_c:
+            obs_c[-1] += oa
+            exp_c[-1] += ea
+        else:
+            obs_c.append(oa)
+            exp_c.append(ea)
+
+    if len(obs_c) >= 2:
+        chi2, p_val = stats.chisquare(obs_c, exp_c)
+    else:
+        chi2, p_val = 0, 1.0
+
+    results_h2.append(
+        {
+            "lambda": lam,
+            "expected_mean": expected_mean,
+            "observed_mean": round(np.mean(counts), 2),
+            "observed_std": round(np.std(counts, ddof=1), 2),
+            "chi2": round(chi2, 3),
+            "p_value": round(p_val, 4),
+            "significant": p_val < ALPHA_CORRECTED,
+        }
+    )
+
+    status = "MATCHES POISSON" if p_val > ALPHA_CORRECTED else "DEVIATES*"
+    print(f"  lambda={lam:.1f}: E[N]={expected_mean:.1f}, obs_mean={np.mean(counts):.2f}, chi2={chi2:.2f}, p={p_val:.4f} [{status}]")
+
+h2_table = pd.DataFrame(results_h2)
+h2_table.to_csv(f"{TABLES_DIR}/h2_results.csv", index=False)
+
+plt.suptitle("H2: Observed vs. Poisson Attack Counts", fontsize=14, fontweight="bold", y=1.02)
+plt.tight_layout()
+plt.savefig(f"{FIGURES_DIR}/h2_poisson_overlay.png", dpi=300, bbox_inches="tight")
+plt.close()
+print(f"\nFigure saved: {FIGURES_DIR}/h2_poisson_overlay.png")
 
 
-def run_full_analysis(cfg: Phase3Config):
-    results_file = os.path.join(cfg.results_dir, "all_results.csv")
-    if not os.path.exists(results_file):
-        raise FileNotFoundError(f"{results_file} not found")
-    df = pd.read_csv(results_file)
-    print(f"Loaded {len(df)} rows for analysis")
-    out_tables = os.path.join(cfg.analysis_dir, "tables")
-    out_figs = os.path.join(cfg.analysis_dir, "figures")
-    os.makedirs(out_tables, exist_ok=True)
-    os.makedirs(out_figs, exist_ok=True)
-    analyze_h1(df, out_tables, out_figs, cfg.show_figures)
-    analyze_h2(df, out_tables, out_figs, cfg.show_figures)
-    analyze_h3(df, out_tables, out_figs, cfg.show_figures)
-    analyze_h4(df, out_tables, out_figs, cfg.show_figures)
-    analyze_h5(df, out_tables, out_figs, cfg.show_figures)
-    print("Analysis complete.")
+# ============================================================================
+# SECTION 5: HYPOTHESIS 3 -- EXPONENTIAL INTER-ARRIVALS
+# ============================================================================
+
+print("\n" + "=" * 70)
+print("SECTION 5: HYPOTHESIS 3 -- EXPONENTIAL INTER-ARRIVAL TIMES")
+print("H0: Inter-arrival times ~ Exponential(lambda)")
+print("=" * 70)
+
+results_h3 = []
+n_lam = len(df["lambda_attack_rate"].unique())
+fig, axes = plt.subplots(2, n_lam, figsize=(4.5 * n_lam, 9), squeeze=False)
+
+for col, lam in enumerate(sorted(df["lambda_attack_rate"].unique())):
+    subset = df[df["lambda_attack_rate"] == lam]
+    all_ia = []
+    for _, row in subset.iterrows():
+        try:
+            all_ia.extend(json.loads(row["inter_arrival_times"]))
+        except Exception:
+            continue
+    ia = np.array(all_ia)
+    if len(ia) < 10:
+        print(f"  lambda={lam}: Too few inter-arrival times ({len(ia)})")
+        continue
+
+    ks_stat, p_val = stats.kstest(ia, "expon", args=(0, 1.0 / lam))
+    results_h3.append(
+        {
+            "lambda": lam,
+            "theoretical_mean": round(1.0 / lam, 3),
+            "observed_mean": round(np.mean(ia), 3),
+            "theoretical_median": round(np.log(2) / lam, 3),
+            "observed_median": round(np.median(ia), 3),
+            "ks_statistic": round(ks_stat, 4),
+            "p_value": round(p_val, 4),
+            "n_samples": len(ia),
+            "significant": p_val < ALPHA_CORRECTED,
+        }
+    )
+    status = "MATCHES EXP" if p_val > ALPHA_CORRECTED else "DEVIATES*"
+    print(f"  lambda={lam:.1f}: E[T]={1.0/lam:.2f}, obs_mean={np.mean(ia):.3f}, KS={ks_stat:.4f}, p={p_val:.4f} [{status}]")
+
+    ax_h = axes[0, col]
+    ax_h.hist(ia, bins=50, density=True, alpha=0.7, edgecolor="black", color="steelblue", label="Simulated")
+    t_range = np.linspace(0, np.percentile(ia, 99), 200)
+    ax_h.plot(t_range, lam * np.exp(-lam * t_range), "r-", linewidth=2.5, label=f"Exp(lambda={lam})")
+    ax_h.set_xlabel("Inter-Arrival Time (min)")
+    ax_h.set_ylabel("Density")
+    ax_h.set_title(f"lambda = {lam}", fontweight="bold")
+    ax_h.legend(fontsize=8)
+    ax_h.grid(True, alpha=0.3)
+
+    ax_q = axes[1, col]
+    n_pts = min(len(ia), 200)
+    probs = np.linspace(0.01, 0.99, n_pts)
+    theo_q = stats.expon.ppf(probs, scale=1.0 / lam)
+    samp_q = np.quantile(ia, probs)
+    ax_q.scatter(theo_q, samp_q, alpha=0.5, s=10)
+    max_v = max(theo_q.max(), samp_q.max())
+    ax_q.plot([0, max_v], [0, max_v], "r--", linewidth=2, label="Perfect fit")
+    ax_q.set_xlabel("Theoretical Quantiles")
+    ax_q.set_ylabel("Sample Quantiles")
+    ax_q.set_title(f"Q-Q: lambda = {lam}", fontweight="bold")
+    ax_q.legend(fontsize=8)
+    ax_q.grid(True, alpha=0.3)
+
+h3_table = pd.DataFrame(results_h3)
+h3_table.to_csv(f"{TABLES_DIR}/h3_results.csv", index=False)
+
+plt.suptitle("H3: Exponential Inter-Arrival Time Analysis", fontsize=14, fontweight="bold", y=1.02)
+plt.tight_layout()
+plt.savefig(f"{FIGURES_DIR}/h3_exponential_analysis.png", dpi=300, bbox_inches="tight")
+plt.close()
+print(f"\nFigure saved: {FIGURES_DIR}/h3_exponential_analysis.png")
 
 
-def main():
-    cfg = Phase3Config()
-    ensure_dirs(cfg)
-    if cfg.run_synthetic:
-        generate_synthetic_data(cfg, os.path.join(cfg.results_dir, "all_results.csv"))
-    build_experiment_plan(cfg)
-    if cfg.run_experiments:
-        runner = ExperimentRunner(cfg.experiment_plan_csv, cfg.results_dir)
-        runner.run_all()
-    if cfg.run_analysis:
-        run_full_analysis(cfg)
+# ============================================================================
+# SECTION 6: HYPOTHESIS 4 -- THROUGHPUT DEGRADATION
+# ============================================================================
+
+print("\n" + "=" * 70)
+print("SECTION 6: HYPOTHESIS 4 -- THROUGHPUT DEGRADATION")
+print("H0: T(t) = T0 * exp(-alpha * t)")
+print("=" * 70)
+
+def decay_model(t, t0_fit, alpha_fit):
+    return t0_fit * np.exp(-alpha_fit * t)
 
 
-if __name__ == "__main__":
-    main()
+results_h4 = []
+fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+ax1 = axes[0]
+acolors = ["#377eb8", "#ff7f00", "#e41a1c"]
+
+for k, alpha_theory in enumerate(sorted(df["alpha_decay_rate"].unique())):
+    subset = df[df["alpha_decay_rate"] == alpha_theory]
+    fitted_alphas = []
+    r2_values = []
+
+    t = np.linspace(0, SIMULATION_DURATION_MIN, 100)
+    ax1.plot(t, T0 * np.exp(-alpha_theory * t), "--", color=acolors[k % len(acolors)], linewidth=2.5, label=f"Theory alpha={alpha_theory}")
+
+    for _, row in subset.iterrows():
+        try:
+            ts = json.loads(row["throughput_timeseries"])
+            times = np.array([pt[0] for pt in ts])
+            values = np.array([pt[1] for pt in ts])
+        except Exception:
+            continue
+        if len(times) < 5:
+            continue
+        try:
+            popt, _ = curve_fit(
+                decay_model,
+                times,
+                values,
+                p0=[T0, alpha_theory],
+                bounds=([0, 0], [200, 10]),
+                maxfev=5000,
+            )
+            pred = decay_model(times, *popt)
+            ss_res = np.sum((values - pred) ** 2)
+            ss_tot = np.sum((values - np.mean(values)) ** 2)
+            r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+            fitted_alphas.append(popt[1])
+            r2_values.append(r2)
+        except RuntimeError:
+            continue
+
+    for _, row in subset.head(5).iterrows():
+        try:
+            ts = json.loads(row["throughput_timeseries"])
+            ax1.plot([pt[0] for pt in ts], [pt[1] for pt in ts], "-", color=acolors[k % len(acolors)], alpha=0.25, linewidth=0.9)
+        except Exception:
+            continue
+
+    if len(fitted_alphas) == 0:
+        print(f"  alpha={alpha_theory:.1f}: No successful fits")
+        continue
+
+    fa = np.array(fitted_alphas)
+    mean_fa = np.mean(fa)
+    std_fa = np.std(fa, ddof=1)
+    bias = mean_fa - alpha_theory
+    mean_r2 = np.mean(r2_values)
+    results_h4.append(
+        {
+            "alpha_theoretical": alpha_theory,
+            "alpha_fitted_mean": round(mean_fa, 4),
+            "alpha_fitted_std": round(std_fa, 4),
+            "bias": round(bias, 4),
+            "bias_pct": round(100 * bias / alpha_theory, 1),
+            "mean_r_squared": round(mean_r2, 4),
+            "n_fits": len(fitted_alphas),
+            "half_life_theory": round(np.log(2) / alpha_theory, 2),
+            "half_life_fitted": round(np.log(2) / mean_fa, 2),
+        }
+    )
+    print(
+        f"  alpha={alpha_theory:.1f}: fitted={mean_fa:.4f} +/- {std_fa:.4f}, "
+        f"bias={bias:+.4f} ({100*bias/alpha_theory:+.1f}%), R2={mean_r2:.4f}"
+    )
+
+h4_table = pd.DataFrame(results_h4)
+h4_table.to_csv(f"{TABLES_DIR}/h4_results.csv", index=False)
+
+ax1.set_xlabel("Time (minutes)", fontsize=13)
+ax1.set_ylabel("Throughput (Mbps)", fontsize=13)
+ax1.set_title("Throughput Degradation Under Attack", fontsize=14, fontweight="bold")
+ax1.legend(fontsize=10)
+ax1.grid(True, alpha=0.3)
+ax1.set_ylim(-5, 110)
+
+ax2 = axes[1]
+if len(h4_table) > 0:
+    ax2.errorbar(
+        h4_table["alpha_theoretical"],
+        h4_table["alpha_fitted_mean"],
+        yerr=1.96 * h4_table["alpha_fitted_std"],
+        fmt="o",
+        markersize=12,
+        capsize=6,
+        capthick=2,
+        color="steelblue",
+        markeredgecolor="black",
+        linewidth=2,
+    )
+    mx = max(h4_table["alpha_theoretical"].max(), h4_table["alpha_fitted_mean"].max()) * 1.15
+    ax2.plot([0, mx], [0, mx], "r--", linewidth=2, label="Perfect agreement")
+ax2.set_xlabel("Theoretical alpha", fontsize=13)
+ax2.set_ylabel("Fitted alpha", fontsize=13)
+ax2.set_title("Fitted vs. Theoretical Decay Rate", fontsize=14, fontweight="bold")
+ax2.legend(fontsize=11)
+ax2.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig(f"{FIGURES_DIR}/h4_degradation_analysis.png", dpi=300, bbox_inches="tight")
+plt.close()
+print(f"\nFigure saved: {FIGURES_DIR}/h4_degradation_analysis.png")
+
+
+# ============================================================================
+# SECTION 7: HYPOTHESIS 5 -- CROSS-VALIDATION
+# ============================================================================
+
+print("\n" + "=" * 70)
+print("SECTION 7: HYPOTHESIS 5 -- MULTI-MODEL CROSS-VALIDATION")
+print("H0: Models remain consistent when applied together")
+print("=" * 70)
+
+df["theoretical_detection"] = 1 - (1 - df["p_detection"]) ** df["n_packets_per_attack"]
+df["detection_error"] = df["observed_detection_rate"] - df["theoretical_detection"]
+
+print("\nMean detection error by (p, lambda):")
+interaction = df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].agg(["mean", "std"]).round(4)
+print(interaction.to_string())
+interaction.to_csv(f"{TABLES_DIR}/h5_interaction_table.csv")
+
+# Poster-style Figure 2: Error heatmap (small n only)
+small_n_df = df[df["n_packets_per_attack"] <= 5]
+pivot = small_n_df.groupby(["p_detection", "lambda_attack_rate"])["detection_error"].mean().unstack()
+max_err = max(abs(pivot.values.min()), abs(pivot.values.max()))
+vmax = max(max_err * 1.1, 0.02)
+
+fig, ax = plt.subplots(figsize=(9, 6.5))
+im = ax.imshow(pivot.values, cmap="RdBu_r", aspect="auto", vmin=-vmax, vmax=vmax)
+ax.set_xticks(range(len(pivot.columns)))
+ax.set_xticklabels([f"{v}" for v in pivot.columns], fontsize=12)
+ax.set_yticks(range(len(pivot.index)))
+ax.set_yticklabels([f"{v:.2f}" for v in pivot.index], fontsize=12)
+ax.set_xlabel("Attack Rate lambda (attacks/min)", fontsize=14)
+ax.set_ylabel("Detection Probability p", fontsize=14)
+ax.set_title("Where Models Break Down (n <= 5 packets)\nPrediction Error (Observed - Theoretical)", fontsize=16, fontweight="bold")
+
+for i in range(len(pivot.index)):
+    for j in range(len(pivot.columns)):
+        val = pivot.values[i, j]
+        color = "white" if abs(val) > vmax * 0.6 else "black"
+        ax.text(j, i, f"{val:+.3f}", ha="center", va="center", color=color, fontsize=11, fontweight="bold")
+
+plt.colorbar(im, ax=ax, shrink=0.85, label="Prediction Error")
+plt.tight_layout()
+plt.savefig(f"{FIGURES_DIR}/h5_error_heatmap.png", dpi=300, bbox_inches="tight")
+plt.close()
+print(f"\nFigure saved: {FIGURES_DIR}/h5_error_heatmap.png")
+
+# Poster-style Figure 4: Interaction plot (n=1)
+int_data = df[df["n_packets_per_attack"] == 1]
+fig, ax = plt.subplots(figsize=(9, 6))
+icolors = ["#e41a1c", "#ff7f00", "#4daf4a", "#377eb8", "#984ea3"]
+
+for i, p in enumerate(sorted(int_data["p_detection"].unique())):
+    sub = int_data[int_data["p_detection"] == p]
+    means = sub.groupby("lambda_attack_rate")["observed_detection_rate"].mean()
+    stds = sub.groupby("lambda_attack_rate")["observed_detection_rate"].std()
+    ns = sub.groupby("lambda_attack_rate").size()
+    ax.errorbar(
+        means.index,
+        means.values,
+        yerr=1.96 * stds.values / np.sqrt(ns.values),
+        fmt="o-",
+        color=icolors[i % len(icolors)],
+        linewidth=2.5,
+        markersize=9,
+        capsize=4,
+        label=f"p = {p:.2f}",
+    )
+    ax.axhline(y=p, color=icolors[i % len(icolors)], linestyle=":", alpha=0.4, linewidth=1)
+
+ax.set_xlabel("Attack Rate lambda (attacks/min)", fontsize=14)
+ax.set_ylabel("Mean Detection Rate (n=1)", fontsize=14)
+ax.set_title("Interaction: IDS Quality x Attack Rate", fontsize=16, fontweight="bold")
+ax.legend(title="IDS Quality (p)", fontsize=10, title_fontsize=11)
+ax.grid(True, alpha=0.3)
+ax.set_ylim(0, 1.05)
+plt.tight_layout()
+plt.savefig(f"{FIGURES_DIR}/h5_interaction_plot.png", dpi=300, bbox_inches="tight")
+plt.close()
+print(f"Figure saved: {FIGURES_DIR}/h5_interaction_plot.png")
+
+
+# ============================================================================
+# SECTION 8: EFFECT SIZES
+# ============================================================================
+
+print("\n" + "=" * 70)
+print("SECTION 8: EFFECT SIZES (Cohen's d)")
+print("=" * 70)
+
+print("\nH1 Effect Sizes:")
+for _, row in h1_table.iterrows():
+    label = (
+        "negligible"
+        if abs(row["cohens_d"]) < 0.2
+        else "small"
+        if abs(row["cohens_d"]) < 0.5
+        else "medium"
+        if abs(row["cohens_d"]) < 0.8
+        else "LARGE"
+    )
+    print(f"  p={row['p']:.2f}, n={row['n']:3.0f}: d = {row['cohens_d']:+.3f} ({label})")
+
+
+# ============================================================================
+# SECTION 9: FOREST PLOT / CONFIDENCE INTERVALS
+# ============================================================================
+
+print("\n" + "=" * 70)
+print("SECTION 9: CONFIDENCE INTERVAL FOREST PLOT")
+print("=" * 70)
+
+fig, ax = plt.subplots(figsize=(10, max(8, len(h1_table) * 0.4)))
+labels = []
+pos = 0
+
+for _, row in h1_table.sort_values(["p", "n"], ascending=[False, True]).iterrows():
+    ci_w_lo = row["observed_mean"] - row["ci_lower"]
+    ci_w_hi = row["ci_upper"] - row["observed_mean"]
+    color = "#2ca02c" if row["theory_in_ci"] else "#d62728"
+
+    ax.errorbar(
+        row["observed_mean"],
+        pos,
+        xerr=[[ci_w_lo], [ci_w_hi]],
+        fmt="o",
+        color=color,
+        markersize=6,
+        capsize=3,
+        capthick=1.5,
+        linewidth=1.5,
+    )
+    ax.plot(row["theoretical"], pos, "|", color="black", markersize=12, markeredgewidth=2)
+    labels.append(f"p={row['p']:.2f}, n={int(row['n'])}")
+    pos += 1
+
+ax.set_yticks(range(len(labels)))
+ax.set_yticklabels(labels, fontsize=9)
+ax.set_xlabel("Detection Rate")
+ax.set_title(
+    "H1 Forest Plot: Observed (dots) vs. Theoretical (bars)\nGreen = CI contains theory, Red = CI excludes theory",
+    fontweight="bold",
+)
+ax.grid(True, axis="x", alpha=0.3)
+plt.tight_layout()
+plt.savefig(f"{FIGURES_DIR}/h1_forest_plot.png", dpi=300, bbox_inches="tight")
+plt.close()
+print(f"Figure saved: {FIGURES_DIR}/h1_forest_plot.png")
+
+
+# ============================================================================
+# SECTION 10: SUMMARY
+# ============================================================================
+
+print("\n" + "=" * 70)
+print("SECTION 10: SUMMARY")
+print("=" * 70)
+
+print(f"\nSignificance threshold: alpha = {ALPHA_CORRECTED:.3f} (Bonferroni-corrected for {N_HYPOTHESES} tests)")
+
+print("\nH1 (Binomial Detection):")
+n_sig = h1_table["significant"].sum()
+print(f"  {n_sig} of {len(h1_table)} conditions show significant deviation")
+
+print("\nH2 (Poisson Counts):")
+for _, row in h2_table.iterrows():
+    s = "SIGNIFICANT" if row["significant"] else "not significant"
+    print(f"  lambda={row['lambda']:.1f}: {s} (p={row['p_value']:.4f})")
+
+print("\nH3 (Exponential Inter-Arrivals):")
+for _, row in h3_table.iterrows():
+    s = "SIGNIFICANT" if row["significant"] else "not significant"
+    print(f"  lambda={row['lambda']:.1f}: {s} (p={row['p_value']:.4f})")
+
+print("\nH4 (Throughput Degradation):")
+for _, row in h4_table.iterrows():
+    print(f"  alpha={row['alpha_theoretical']:.1f}: bias={row['bias_pct']:+.1f}%, R2={row['mean_r_squared']:.4f}")
+
+print(f"\nFigures saved to: {FIGURES_DIR}/")
+print(f"Tables saved to:  {TABLES_DIR}/")
+
+print("\n" + "=" * 70)
+print("DONE")
+print("=" * 70)
