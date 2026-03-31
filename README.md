@@ -40,30 +40,19 @@ python -m experiments.generate_graphs
 python phase3_analysis.py
 ```
 
-**PowerShell (generate synthetic dataset only):**
+**Optional Phase 3 flags:**
+- `--generate-only` -> generate synthetic dataset and exit
+- `--use-synthetic` -> run full pipeline on synthetic data
+- `--results-file <path>` -> use a custom input/output CSV path
+- `--no-figures` -> save figures only, no popup windows
+- `--show-figures` -> force popup windows (Windows opens sequentially by default)
+
+Examples:
 ```powershell
 python .\phase3_analysis.py --generate-only
-```
-
-**PowerShell (run full pipeline using synthetic data):**
-```powershell
 python .\phase3_analysis.py --use-synthetic
-```
-
-**PowerShell (ordered figure popups):**
-- On Windows, figures open one-by-one by default (close each figure window to continue).
-- Disable popups and save only:
-```powershell
-python .\phase3_analysis.py --no-figures
-```
-- Force popup mode explicitly:
-```powershell
-python .\phase3_analysis.py --show-figures
-```
-
-**Use a custom results CSV path:**
-```powershell
 python .\phase3_analysis.py --results-file results\all_results.csv
+python .\phase3_analysis.py --no-figures
 ```
 
 **Run tests:**
