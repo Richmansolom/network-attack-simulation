@@ -35,6 +35,37 @@ python -m experiments.validation_scripts
 python -m experiments.generate_graphs
 ```
 
+**Run Phase 3 analysis pipeline:**
+```bash
+python phase3_analysis.py
+```
+
+**PowerShell (generate synthetic dataset only):**
+```powershell
+python .\phase3_analysis.py --generate-only
+```
+
+**PowerShell (run full pipeline using synthetic data):**
+```powershell
+python .\phase3_analysis.py --use-synthetic
+```
+
+**PowerShell (ordered figure popups):**
+- On Windows, figures open one-by-one by default (close each figure window to continue).
+- Disable popups and save only:
+```powershell
+python .\phase3_analysis.py --no-figures
+```
+- Force popup mode explicitly:
+```powershell
+python .\phase3_analysis.py --show-figures
+```
+
+**Use a custom results CSV path:**
+```powershell
+python .\phase3_analysis.py --results-file results\all_results.csv
+```
+
 **Run tests:**
 ```bash
 pytest
