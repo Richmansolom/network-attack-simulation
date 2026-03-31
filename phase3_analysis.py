@@ -48,7 +48,27 @@ import sys
 import warnings
 
 import matplotlib
-matplotlib.use("Agg")
+
+# Early CLI parsing (needed before backend selection).
+ARG_SET = set(sys.argv[1:])
+GENERATE_ONLY = "--generate-only" in ARG_SET
+USE_SYNTHETIC_CLI = "--use-synthetic" in ARG_SET or GENERATE_ONLY
+SHOW_FIGURES = (
+    "--show-figures" in ARG_SET
+    or "--open-figures" in ARG_SET
+    or (os.name == "nt" and "--no-figures" not in ARG_SET and not GENERATE_ONLY)
+)
+
+if SHOW_FIGURES:
+    try:
+        matplotlib.use("TkAgg")
+    except Exception:
+        matplotlib.use("Agg")
+        SHOW_FIGURES = False
+        print("WARNING: Interactive backend unavailable; saving figures only.")
+else:
+    matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -63,8 +83,7 @@ np.random.seed(BASE_SEED)
 #   --generate-only       -> generate synthetic data and exit
 #   --use-synthetic       -> run full pipeline using synthetic data
 #   --results-file <path> -> override input/output CSV path
-GENERATE_ONLY = "--generate-only" in sys.argv
-if "--use-synthetic" in sys.argv or GENERATE_ONLY:
+if USE_SYNTHETIC_CLI:
     USE_SYNTHETIC_DATA = True
 if "--results-file" in sys.argv:
     idx = sys.argv.index("--results-file")
@@ -85,6 +104,8 @@ print("=" * 70)
 print("PHASE 3 STATISTICAL ANALYSIS")
 print("Network Attack Simulation Research")
 print("=" * 70)
+if SHOW_FIGURES:
+    print("Interactive figure mode ON (close each figure window to continue).")
 
 
 # ============================================================================
@@ -299,6 +320,9 @@ ax.set_ylim(-0.05, 1.05)
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{FIGURES_DIR}/h1_detection_overlay.png", dpi=300, bbox_inches="tight")
+if SHOW_FIGURES:
+    print("Opening figure: h1_detection_overlay.png (close window to continue)")
+    plt.show()
 plt.close()
 print(f"\nFigure saved: {FIGURES_DIR}/h1_detection_overlay.png")
 
@@ -382,6 +406,9 @@ h2_table.to_csv(f"{TABLES_DIR}/h2_results.csv", index=False)
 plt.suptitle("H2: Observed vs. Poisson Attack Counts", fontsize=14, fontweight="bold", y=1.02)
 plt.tight_layout()
 plt.savefig(f"{FIGURES_DIR}/h2_poisson_overlay.png", dpi=300, bbox_inches="tight")
+if SHOW_FIGURES:
+    print("Opening figure: h2_poisson_overlay.png (close window to continue)")
+    plt.show()
 plt.close()
 print(f"\nFigure saved: {FIGURES_DIR}/h2_poisson_overlay.png")
 
@@ -459,6 +486,9 @@ h3_table.to_csv(f"{TABLES_DIR}/h3_results.csv", index=False)
 plt.suptitle("H3: Exponential Inter-Arrival Time Analysis", fontsize=14, fontweight="bold", y=1.02)
 plt.tight_layout()
 plt.savefig(f"{FIGURES_DIR}/h3_exponential_analysis.png", dpi=300, bbox_inches="tight")
+if SHOW_FIGURES:
+    print("Opening figure: h3_exponential_analysis.png (close window to continue)")
+    plt.show()
 plt.close()
 print(f"\nFigure saved: {FIGURES_DIR}/h3_exponential_analysis.png")
 
@@ -584,6 +614,9 @@ ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.savefig(f"{FIGURES_DIR}/h4_degradation_analysis.png", dpi=300, bbox_inches="tight")
+if SHOW_FIGURES:
+    print("Opening figure: h4_degradation_analysis.png (close window to continue)")
+    plt.show()
 plt.close()
 print(f"\nFigure saved: {FIGURES_DIR}/h4_degradation_analysis.png")
 
@@ -630,6 +663,9 @@ for i in range(len(pivot.index)):
 plt.colorbar(im, ax=ax, shrink=0.85, label="Prediction Error")
 plt.tight_layout()
 plt.savefig(f"{FIGURES_DIR}/h5_error_heatmap.png", dpi=300, bbox_inches="tight")
+if SHOW_FIGURES:
+    print("Opening figure: h5_error_heatmap.png (close window to continue)")
+    plt.show()
 plt.close()
 print(f"\nFigure saved: {FIGURES_DIR}/h5_error_heatmap.png")
 
@@ -664,6 +700,9 @@ ax.grid(True, alpha=0.3)
 ax.set_ylim(0, 1.05)
 plt.tight_layout()
 plt.savefig(f"{FIGURES_DIR}/h5_interaction_plot.png", dpi=300, bbox_inches="tight")
+if SHOW_FIGURES:
+    print("Opening figure: h5_interaction_plot.png (close window to continue)")
+    plt.show()
 plt.close()
 print(f"Figure saved: {FIGURES_DIR}/h5_interaction_plot.png")
 
@@ -732,6 +771,9 @@ ax.set_title(
 ax.grid(True, axis="x", alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{FIGURES_DIR}/h1_forest_plot.png", dpi=300, bbox_inches="tight")
+if SHOW_FIGURES:
+    print("Opening figure: h1_forest_plot.png (close window to continue)")
+    plt.show()
 plt.close()
 print(f"Figure saved: {FIGURES_DIR}/h1_forest_plot.png")
 
